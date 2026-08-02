@@ -7,7 +7,6 @@ from unittest.mock import patch
 
 
 from notify_me.cli import run_cli
-from notify_me.constants import MANAGED_BLOCK
 from notify_me.errors import NotifyMeError
 from notify_me.runtime import resolve_scope
 from notify_me.transport import FakeBarkTransport, TransportResult
@@ -15,6 +14,9 @@ from notify_me.transport import FakeBarkTransport, TransportResult
 
 class MvpActivationTests(unittest.TestCase):
     def prepare_active(self, env, fake):
+        env.setdefault(
+            "NOTIFY_ME_PLUGIN_ROOT", str(Path(__file__).resolve().parents[1])
+        )
         run_cli(["onboarding", "initialize"], env=env)
         run_cli(
             ["setup"],
@@ -381,6 +383,129 @@ class MvpActivationTests(unittest.TestCase):
             state_bytes = Path(env["NOTIFY_ME_CONFIG_DIR"], "state.sqlite3").read_bytes()
             self.assertNotIn(b"waiting-for-approval", state_bytes)
 
+    def test_send_resolves_exact_task_title_and_project_without_agent_parameters(self):
+        fake = FakeBarkTransport()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "fixture-scope-01",
+                "CODEX_THREAD_ID": None,
+            }
+            self.prepare_active(env, fake)
+            thread_id = "019fc427-6c68-73c3-bde9-fd2a68d06054"
+            env["CODEX_THREAD_ID"] = thread_id
+            env["NOTIFY_ME_TEST_SCOPE"] = thread_id
+            code_home = Path(env["CODEX_HOME"])
+            (code_home / "session_index.jsonl").write_text(
+                json.dumps(
+                    {
+                        "id": thread_id,
+                        "thread_name": "等待四位确认码",
+                        "updated_at": "2026-08-03T04:25:52Z",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            project_path = Path(temp_dir) / "notify_me"
+            (code_home / ".codex-global-state.json").write_text(
+                json.dumps(
+                    {
+                        "thread-project-assignments": {
+                            thread_id: {
+                                "projectKind": "local",
+                                "path": str(project_path),
+                            }
+                        },
+                        "projectless-thread-ids": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = run_cli(
+                [
+                    "send",
+                    "--condition-id",
+                    "blocking",
+                    "--item-id",
+                    "auto-context-event",
+                    "--state",
+                    "waiting-for-code",
+                    "--action",
+                    "请提供准确的四位确认码",
+                ],
+                env=env,
+                transport=fake,
+            )
+
+            self.assertEqual(result["status"], "accepted")
+            self.assertEqual(
+                fake.payloads[-1]["title"], "🖐 需要操作｜等待四位确认码"
+            )
+            self.assertEqual(
+                fake.payloads[-1]["body"],
+                "请提供准确的四位确认码（所属项目：notify_me）",
+            )
+
+    def test_send_resolves_title_but_omits_project_for_projectless_task(self):
+        fake = FakeBarkTransport()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "fixture-scope-01",
+                "CODEX_THREAD_ID": None,
+            }
+            self.prepare_active(env, fake)
+            thread_id = "019fc427-6c68-73c3-bde9-fd2a68d06054"
+            env["CODEX_THREAD_ID"] = thread_id
+            env["NOTIFY_ME_TEST_SCOPE"] = thread_id
+            code_home = Path(env["CODEX_HOME"])
+            (code_home / "session_index.jsonl").write_text(
+                json.dumps({"id": thread_id, "thread_name": "等待四位确认码"}, ensure_ascii=False)
+                + "\n",
+                encoding="utf-8",
+            )
+            (code_home / ".codex-global-state.json").write_text(
+                json.dumps(
+                    {
+                        "projectless-thread-ids": [thread_id],
+                        "thread-project-assignments": {
+                            thread_id: {
+                                "projectKind": "local",
+                                "path": str(Path(temp_dir) / "stale-project"),
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = run_cli(
+                [
+                    "send",
+                    "--condition-id",
+                    "blocking",
+                    "--item-id",
+                    "projectless-context-event",
+                    "--state",
+                    "waiting-for-code",
+                    "--action",
+                    "请提供准确的四位确认码",
+                ],
+                env=env,
+                transport=fake,
+            )
+
+            self.assertEqual(result["status"], "accepted")
+            self.assertEqual(fake.payloads[-1]["title"], "🖐 需要操作｜等待四位确认码")
+            self.assertEqual(fake.payloads[-1]["body"], "请提供准确的四位确认码")
+
     def test_machine_slug_action_is_rejected_before_transport(self):
         fake = FakeBarkTransport()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -426,26 +551,30 @@ class MvpActivationTests(unittest.TestCase):
             }
             self.prepare_active(env, fake)
 
-            result = run_cli(
-                [
-                    "send",
-                    "--condition-id",
-                    "blocking",
-                    "--item-id",
-                    "private-event",
-                    "--state",
-                    "waiting-private",
-                    "--action",
-                    "请批准机密项目付款",
-                    "--task-title",
-                    "机密收购项目",
-                    "--project-name",
-                    "secret_project",
-                    "--private",
-                ],
-                env=env,
-                transport=fake,
-            )
+            with patch(
+                "notify_me.runtime.resolve_task_context",
+                side_effect=AssertionError("隐私模式不得读取任务展示元数据"),
+            ):
+                result = run_cli(
+                    [
+                        "send",
+                        "--condition-id",
+                        "blocking",
+                        "--item-id",
+                        "private-event",
+                        "--state",
+                        "waiting-private",
+                        "--action",
+                        "请批准机密项目付款",
+                        "--task-title",
+                        "机密收购项目",
+                        "--project-name",
+                        "secret_project",
+                        "--private",
+                    ],
+                    env=env,
+                    transport=fake,
+                )
 
             self.assertEqual(result["status"], "accepted")
             payload = fake.payloads[-1]
@@ -676,7 +805,10 @@ class MvpActivationTests(unittest.TestCase):
             }
             self.prepare_active(env, fake)
             agents = Path(env["CODEX_HOME"], "AGENTS.md")
-            agents.write_text(MANAGED_BLOCK.replace("任务阻塞", "规则漂移") + "\n", encoding="utf-8")
+            block = run_cli(["agents-rule", "plan"], env=env)["managed_block"]
+            agents.write_text(
+                block.replace("任务阻塞", "规则漂移") + "\n", encoding="utf-8"
+            )
             payload_count = len(fake.payloads)
 
             result = run_cli(

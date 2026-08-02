@@ -1,17 +1,26 @@
 import tempfile
 import threading
 import unittest
+import shlex
 from pathlib import Path
 from unittest.mock import patch
 
 import notify_me.activation as activation
 from notify_me.cli import run_cli
-from notify_me.constants import LEGACY_MANAGED_BLOCK_V1, MANAGED_BLOCK
+from notify_me.constants import (
+    LEGACY_MANAGED_BLOCK_V1,
+    LEGACY_MANAGED_BLOCK_V2,
+    managed_block,
+)
 from notify_me.storage import StateStore, resolve_storage_paths
 from notify_me.transport import FakeBarkTransport
 
 
 class AgentsRuleActivationTests(unittest.TestCase):
+    def expected_block(self, env):
+        launcher = resolve_storage_paths(env).launcher
+        return managed_block(shlex.quote(str(launcher)))
+
     def environment(self, temp_dir):
         return {
             "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
@@ -19,6 +28,7 @@ class AgentsRuleActivationTests(unittest.TestCase):
             "NOTIFY_ME_TEST_MODE": "1",
             "NOTIFY_ME_TEST_SCOPE": "activation-install-scope",
             "CODEX_THREAD_ID": None,
+            "NOTIFY_ME_PLUGIN_ROOT": str(Path(__file__).resolve().parents[1]),
         }
 
     def prepare_activation(self, env):
@@ -55,10 +65,31 @@ class AgentsRuleActivationTests(unittest.TestCase):
             self.assertEqual(plan["change"], "append")
             self.assertEqual(denied["error"]["code"], "explicit_authorization_required")
             self.assertTrue(committed["changed"])
-            self.assertEqual(override.read_text(encoding="utf-8"), "override instructions\n" + MANAGED_BLOCK + "\n")
+            self.assertEqual(
+                override.read_text(encoding="utf-8"),
+                "override instructions\n" + self.expected_block(env) + "\n",
+            )
             self.assertEqual(default.read_text(encoding="utf-8"), "default instructions\n")
 
-    def test_exact_v1_managed_block_can_be_safely_upgraded_to_v2(self):
+    def test_activation_installs_and_binds_a_stable_direct_notification_launcher(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            self.prepare_activation(env)
+            codex_home = Path(env["CODEX_HOME"])
+            codex_home.mkdir()
+            (codex_home / "AGENTS.md").write_text("user\n", encoding="utf-8")
+            launcher = Path(env["NOTIFY_ME_CONFIG_DIR"]) / "bin" / "notify-me"
+
+            plan = run_cli(["agents-rule", "plan"], env=env)
+
+            self.assertTrue(launcher.is_file())
+            self.assertTrue(launcher.stat().st_mode & 0o100)
+            self.assertIn(str(launcher), plan["managed_block"])
+            self.assertIn("调用固定入口", plan["managed_block"])
+            self.assertIn("直接以宿主提权模式", plan["managed_block"])
+            self.assertIn("无需读取 Notify Me Skill", plan["managed_block"])
+
+    def test_exact_v1_managed_block_can_be_safely_upgraded_to_v3(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             env = self.environment(temp_dir)
             self.prepare_activation(env)
@@ -81,7 +112,38 @@ class AgentsRuleActivationTests(unittest.TestCase):
 
             self.assertEqual(plan["change"], "upgrade")
             self.assertTrue(committed["changed"])
-            self.assertEqual(agents.read_text(encoding="utf-8"), "user content\n" + MANAGED_BLOCK + "\n")
+            self.assertEqual(
+                agents.read_text(encoding="utf-8"),
+                "user content\n" + self.expected_block(env) + "\n",
+            )
+
+    def test_exact_v2_managed_block_can_be_safely_upgraded_to_v3(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            self.prepare_activation(env)
+            codex_home = Path(env["CODEX_HOME"])
+            codex_home.mkdir()
+            agents = codex_home / "AGENTS.md"
+            agents.write_text("user content\n" + LEGACY_MANAGED_BLOCK_V2 + "\n", encoding="utf-8")
+
+            plan = run_cli(["agents-rule", "plan"], env=env)
+            committed = run_cli(
+                [
+                    "agents-rule",
+                    "commit",
+                    "--authorize",
+                    "--expected-sha256",
+                    plan["current_sha256"],
+                ],
+                env=env,
+            )
+
+            self.assertEqual(plan["change"], "upgrade")
+            self.assertTrue(committed["changed"])
+            self.assertEqual(
+                agents.read_text(encoding="utf-8"),
+                "user content\n" + self.expected_block(env) + "\n",
+            )
 
     def test_rule_install_reports_restart_until_a_new_task_verifies_it(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -215,7 +277,8 @@ class AgentsRuleActivationTests(unittest.TestCase):
             self.assertEqual(unsafe["error"]["code"], "unsafe_agents_target")
 
             (codex_home / "AGENTS.md").unlink()
-            duplicate = MANAGED_BLOCK + "\n" + MANAGED_BLOCK + "\n"
+            block = self.expected_block(env)
+            duplicate = block + "\n" + block + "\n"
             (codex_home / "AGENTS.md").write_text(duplicate, encoding="utf-8")
             conflict = run_cli(["agents-rule", "plan"], env=env)
             self.assertEqual(conflict["error"]["code"], "managed_block_conflict")
@@ -233,7 +296,10 @@ class AgentsRuleActivationTests(unittest.TestCase):
             self.assertTrue(result["ok"])
             content = agents.read_bytes()
             self.assertIn(b"before\r\n", content)
-            self.assertIn(MANAGED_BLOCK.replace("\n", "\r\n").encode("utf-8"), content)
+            self.assertIn(
+                self.expected_block(env).replace("\n", "\r\n").encode("utf-8"),
+                content,
+            )
             self.assertNotIn(b"\n", content.replace(b"\r\n", b""))
 
     def test_new_task_scope_must_differ_from_the_task_that_installed_the_rule(self):
@@ -319,9 +385,10 @@ class AgentsRuleActivationTests(unittest.TestCase):
             codex_home = Path(env["CODEX_HOME"])
             codex_home.mkdir()
             agents = codex_home / "AGENTS.md"
-            agents.write_text("before\n" + MANAGED_BLOCK + "\n", encoding="utf-8")
+            block = self.expected_block(env)
+            agents.write_text("before\n" + block + "\n", encoding="utf-8")
             agents.write_text(
-                "before\n" + MANAGED_BLOCK.replace("任务阻塞", "用户阻塞") + "\n",
+                "before\n" + block.replace("任务阻塞", "用户阻塞") + "\n",
                 encoding="utf-8",
             )
 
@@ -416,4 +483,6 @@ class AgentsRuleActivationTests(unittest.TestCase):
                 sum(result.get("error", {}).get("code") == "agents_changed" for result in results),
                 1,
             )
-            self.assertEqual(agents.read_text(encoding="utf-8").count(MANAGED_BLOCK), 1)
+            self.assertEqual(
+                agents.read_text(encoding="utf-8").count(self.expected_block(env)), 1
+            )

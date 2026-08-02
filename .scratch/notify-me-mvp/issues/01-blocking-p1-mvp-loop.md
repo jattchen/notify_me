@@ -1,6 +1,6 @@
 # 01 — 跑通 Blocking/P1 最小真机闭环
 
-**What to build:** 让用户能够从本地安装 Notify Me 开始，通过渐进式激活流程私密绑定 Bark、自动初始化最小状态库并确认测试通知；经明确授权写入实际生效的全局 AGENTS 托管规则后，新顶层任务遇到任务阻塞时，主 Agent 按需读取 Notify Me，并让用户手机收到固定 P1 通知。此 Ticket 是整个 MVP 的 tracer bullet，只实现完成该闭环所需的最薄 Activation、Notification Runtime 与 Bark Transport，不实现用户订阅或 Hook。
+**What to build:** 让用户能够从本地安装 Notify Me 开始，通过渐进式激活流程私密绑定 Bark、自动初始化最小状态库并确认测试通知；经明确授权写入实际生效的全局 AGENTS 托管规则后，新顶层任务遇到任务阻塞时，主 Agent 直接调用稳定通知入口，并让用户手机收到固定 P1 通知。此 Ticket 是整个 MVP 的 tracer bullet，只实现完成该闭环所需的最薄 Activation、Notification Runtime 与 Bark Transport，不实现用户订阅或 Hook。
 
 **Blocked by:** None — can start immediately.
 
@@ -12,7 +12,7 @@
 - [ ] 用户能够发送固定 P1 测试通知；本地 fake Bark 验证 payload，真实 Bark 只报告“服务已接受”，随后由用户确认手机实际出现通知。
 - [ ] 激活流程解析当前 `CODEX_HOME` 中实际生效的全局 AGENTS 文件，展示精确托管块及影响，并且只有在用户明确授权后才原子写入。
 - [ ] 写入规则后明确进入需要新任务验证的状态，不宣称当前任务热加载成功；新顶层任务能够验证托管规则已经生效。
-- [ ] 新任务中的普通问答不会加载或调用 Notify Me；构造明确的任务阻塞后，主 Agent 才按需读取 Skill，并发送固定 Blocking/P1 通知。
+- [ ] 新任务中的普通问答不会加载或调用 Notify Me；构造明确的任务阻塞后，主 Agent 直接调用稳定入口、不读取完整 Skill，并发送固定 Blocking/P1 通知。
 - [ ] Subagent 或 Ticket Worker 不会自行发送该通知；遇到已知 worker 标识时返回抑制结果。
 - [ ] Ticket 的安装物不声明、不安装、不运行任何 Hook，也不存在用户订阅创建或恢复入口。
 - [ ] 自动化测试覆盖私密绑定、固定 P1 payload、Bark 成功与安全失败分类、AGENTS 托管块写入，以及普通问答与 worker 的负向场景。

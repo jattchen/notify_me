@@ -36,6 +36,7 @@ class MvpPackageContractTests(unittest.TestCase):
                 "NOTIFY_ME_TEST_MODE": "1",
                 "NOTIFY_ME_TEST_SCOPE": "fixture-scope-01",
                 "CODEX_THREAD_ID": None,
+                "NOTIFY_ME_PLUGIN_ROOT": str(Path(__file__).resolve().parents[1]),
             }
             run_cli(["onboarding", "initialize"], env=env)
             run_cli(
@@ -92,7 +93,7 @@ class MvpPackageContractTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         skill = (root / "skills" / "notify-me" / "SKILL.md").read_text()
 
-        self.assertIn("精确到当前安装态入口", skill)
+        self.assertIn("精确到稳定入口", skill)
         self.assertIn("可复用授权", skill)
         self.assertIn("不得申请宽泛的 `python3` 前缀", skill)
         self.assertIn("`ok=false`", skill)
@@ -105,7 +106,8 @@ class MvpPackageContractTests(unittest.TestCase):
 
         self.assertIn("宿主技能清单提供的精确 `SKILL.md` 路径", skill)
         self.assertIn("不得扫描或猜测其他安装目录和版本号", skill)
-        self.assertIn("正常触发快路径", skill)
+        self.assertIn("稳定运行入口", skill)
+        self.assertIn("无需加载这份 Skill", skill)
         self.assertIn("只执行一次 `send`", skill)
         self.assertIn("不得先执行 `onboarding inspect`", skill)
         self.assertIn("面向用户的自然语言", skill)
@@ -115,10 +117,8 @@ class MvpPackageContractTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         skill = (root / "skills" / "notify-me" / "SKILL.md").read_text()
 
-        self.assertIn("--task-title <exact-task-title>", skill)
-        self.assertIn("--project-name <project-folder-name>", skill)
-        self.assertIn("不得自行概括或改写", skill)
-        self.assertIn("无项目会话必须省略", skill)
+        self.assertIn("自动读取 Codex 当前任务的真实可见标题", skill)
+        self.assertIn("明确标记为无项目", skill)
         self.assertIn("隐私模式", skill)
         self.assertIn("不得传入会话标题、项目名或具体行动", skill)
         self.assertIn("标题只保留条件名称", skill)
@@ -143,6 +143,30 @@ class MvpPackageContractTests(unittest.TestCase):
                 check=False,
             )
 
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["status"], "unconfigured")
+
+    def test_stable_launcher_runs_without_the_plugin_source_on_python_path(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_PLUGIN_ROOT": str(root),
+            }
+            initialized = run_cli(["onboarding", "initialize"], env=env)
+            launcher = Path(env["NOTIFY_ME_CONFIG_DIR"]) / "bin" / "notify-me"
+
+            result = subprocess.run(
+                [str(launcher), "onboarding", "inspect"],
+                cwd=temp_dir,
+                env={**os.environ, **env, "PYTHONPATH": ""},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(initialized["status"], "unconfigured")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)["status"], "unconfigured")
 

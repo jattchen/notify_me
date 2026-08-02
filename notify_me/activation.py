@@ -3,6 +3,7 @@
 import hashlib
 import os
 import re
+import shlex
 import stat
 import tempfile
 from contextlib import contextmanager
@@ -14,8 +15,14 @@ try:
 except ImportError:  # pragma: no cover - the supported MVP hosts provide fcntl.
     fcntl = None
 
-from .constants import LEGACY_MANAGED_BLOCK_V1, MANAGED_BLOCK, MANAGED_BLOCK_HASH
+from .constants import (
+    LEGACY_MANAGED_BLOCK_V1,
+    LEGACY_MANAGED_BLOCK_V2,
+    managed_block,
+)
 from .errors import NotifyMeError
+from .launcher import stable_launcher_ready
+from .storage import resolve_storage_paths
 
 
 _START_PREFIX = "<!-- notify-me:managed:start"
@@ -23,7 +30,13 @@ _END_MARKER = "<!-- notify-me:managed:end -->"
 _VERSIONED_STARTS = {
     "<!-- notify-me:managed:start version=1 -->",
     "<!-- notify-me:managed:start version=2 -->",
+    "<!-- notify-me:managed:start version=3 -->",
 }
+
+
+def _expected_managed_block(env):
+    paths = resolve_storage_paths(env)
+    return managed_block(shlex.quote(str(paths.launcher)))
 
 
 @dataclass(frozen=True)
@@ -105,7 +118,7 @@ def _decode(data):
     return text
 
 
-def _managed_block_info(data):
+def _managed_block_info(data, expected_block):
     text = _decode(data)
     starts = [match.start() for match in re.finditer(re.escape(_START_PREFIX), text)]
     ends = [match.start() for match in re.finditer(re.escape(_END_MARKER), text)]
@@ -130,9 +143,9 @@ def _managed_block_info(data):
     if not any(block.startswith(marker) for marker in _VERSIONED_STARTS):
         raise NotifyMeError("managed_block_version", "Notify Me 托管块版本不受支持")
     normalized = block.replace("\r\n", "\n")
-    if normalized == MANAGED_BLOCK:
+    if normalized == expected_block:
         status = "installed"
-    elif normalized == LEGACY_MANAGED_BLOCK_V1:
+    elif normalized in (LEGACY_MANAGED_BLOCK_V1, LEGACY_MANAGED_BLOCK_V2):
         status = "upgradeable"
     else:
         status = "drifted"
@@ -143,10 +156,10 @@ def _newline(text):
     return "\r\n" if "\r\n" in text else "\n"
 
 
-def _candidate_content(info):
+def _candidate_content(info, expected_block):
     text = info["text"]
     newline = _newline(text)
-    block = MANAGED_BLOCK.replace("\n", newline)
+    block = expected_block.replace("\n", newline)
     if info["status"] == "missing":
         separator = "" if not text or text.endswith(("\n", "\r")) else newline
         return text + separator + block + newline
@@ -162,17 +175,19 @@ def _sha(data):
 
 
 def plan_agents_rule(env=None):
-    target = effective_agents(env)
+    values = os.environ if env is None else env
+    expected_block = _expected_managed_block(values)
+    target = effective_agents(values)
     if target.is_symlink:
         raise NotifyMeError("unsafe_agents_target", "生效的 AGENTS 文件不能是符号链接")
     if target.exists and not target.is_regular:
         raise NotifyMeError("unsafe_agents_target", "生效的 AGENTS 文件不是普通文件")
-    info = _managed_block_info(target.data)
+    info = _managed_block_info(target.data, expected_block)
     if info["status"] == "drifted":
         change = "drifted"
         result_bytes = target.data
     else:
-        candidate = _candidate_content(info).encode("utf-8")
+        candidate = _candidate_content(info, expected_block).encode("utf-8")
         change = {"missing": "append", "installed": "none", "upgradeable": "upgrade"}[info["status"]]
         result_bytes = candidate
     return {
@@ -181,8 +196,8 @@ def plan_agents_rule(env=None):
         "exists": target.exists,
         "change": change,
         "current_sha256": _sha(target.data),
-        "managed_block_sha256": MANAGED_BLOCK_HASH,
-        "managed_block": MANAGED_BLOCK,
+        "managed_block_sha256": _sha(expected_block.encode("utf-8")),
+        "managed_block": expected_block,
         "impact": {
             "original_bytes": len(target.data),
             "result_bytes": len(result_bytes),
@@ -298,6 +313,10 @@ def commit_agents_rule(env=None, authorize=False, expected_sha256=None):
     if not authorize:
         raise NotifyMeError("explicit_authorization_required", "写入托管规则必须明确授权")
     values = os.environ if env is None else env
+    paths = resolve_storage_paths(values)
+    if not stable_launcher_ready(paths):
+        raise NotifyMeError("launcher_not_installed", "请先安装 Notify Me 稳定运行入口")
+    expected_block = _expected_managed_block(values)
     target = effective_agents(values)
     if target.is_symlink:
         raise NotifyMeError("unsafe_agents_target", "生效的 AGENTS 文件不能是符号链接")
@@ -306,10 +325,10 @@ def commit_agents_rule(env=None, authorize=False, expected_sha256=None):
     current_hash = _sha(target.data)
     if expected_sha256 and expected_sha256 != current_hash:
         raise NotifyMeError("agents_changed", "生效的 AGENTS 文件在授权前发生变化")
-    info = _managed_block_info(target.data)
+    info = _managed_block_info(target.data, expected_block)
     if info["status"] == "drifted":
         raise NotifyMeError("managed_block_drift", "Notify Me 托管块已被修改，拒绝覆盖")
-    candidate = _candidate_content(info).encode("utf-8")
+    candidate = _candidate_content(info, expected_block).encode("utf-8")
     latest_effective = effective_agents(values)
     if (
         latest_effective.path != target.path
@@ -350,10 +369,12 @@ def commit_agents_rule(env=None, authorize=False, expected_sha256=None):
 
 
 def verify_agents_rule(env=None):
-    target = effective_agents(os.environ if env is None else env)
+    values = os.environ if env is None else env
+    expected_block = _expected_managed_block(values)
+    target = effective_agents(values)
     if target.is_symlink or (target.exists and not target.is_regular):
         raise NotifyMeError("unsafe_agents_target", "生效的 AGENTS 文件不安全")
-    info = _managed_block_info(target.data)
+    info = _managed_block_info(target.data, expected_block)
     if info["status"] != "installed":
         return {
             "status": "not-installed" if info["status"] == "missing" else info["status"],
@@ -364,6 +385,6 @@ def verify_agents_rule(env=None):
         "status": "installed",
         "path": str(target.path),
         "source": target.source,
-        "managed_block_sha256": MANAGED_BLOCK_HASH,
+        "managed_block_sha256": _sha(expected_block.encode("utf-8")),
         "file_sha256": _sha(target.data),
     }

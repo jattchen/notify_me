@@ -15,6 +15,7 @@ from .constants import (
 )
 from .errors import NotifyMeError
 from .storage import StateStore
+from .task_context import resolve_task_context
 from .transport import BarkEndpoint
 
 
@@ -264,6 +265,12 @@ def send_condition(store, endpoint, transport, condition_id, item_id, state, act
         raise NotifyMeError("invalid_item", "通知事项标识无效")
     if not isinstance(state, str) or not state or len(state) > 256:
         raise NotifyMeError("invalid_state", "通知状态无效")
+    if not private and (task_title is None or project_name is None):
+        context = resolve_task_context(values)
+        if task_title is None:
+            task_title = context["task_title"]
+        if project_name is None:
+            project_name = context["project_name"]
     canonical_scope = resolve_scope(values)
     scope_key = _scope_key(store, canonical_scope)
     item_key = hmac.new(

@@ -28,14 +28,14 @@ Notify Me 不用 Hook 判断内置风险，也不用 Hook 守门工具或任务�
 2. 默认覆盖任务阻塞、严重风险和用户主动订阅三类场景。
 3. 支持 P0–P3 优先级、优先级默认效果、条件效果覆盖、内置条件独立启停和订阅功能总开关。
 4. 首次使用时提供可恢复、渐进式、一次只处理一个决策的 Onboarding。
-5. 内置条件只通过全局 AGENTS.md 语义规则让主 Agent 按需加载 Skill；用条件式 `UserPromptSubmit` 与 `SessionStart(source=compact)` 恢复当前任务的有效订阅。
+5. 内置条件通过全局 AGENTS.md 语义规则让主 Agent 直接调用稳定通知入口，不为正常通知加载完整 Skill；用条件式 `UserPromptSubmit` 与 `SessionStart(source=compact)` 恢复当前任务的有效订阅。
 6. 保留任务作用域隔离、精确去重、事项升级、解决后再发生、网络失败队列、过期和并发安全。
 7. Onboarding 指导用户在 Bark App 中找到推送地址，并通过不回显、不进入聊天和命令历史的私密输入保存；同时保留最小负载、错误脱敏、HTTPS 和拒绝重定向等安全边界。
 8. 默认使用现有 Codex 插图作为 Bark 自定义图标，保持通知视觉风格。
 
 ### 2.2 非目标
 
-1. 不修改、置顶、归档或读取 Codex 任务标题。
+1. 不修改、置顶或归档 Codex 任务标题；只允许为通知展示只读获取当前任务的可见标题与项目归属。
 2. 不运行 `PermissionRequest`、工具调用守门或 `Stop` Hook；唯一允许的 Hook 是 `UserPromptSubmit` 和 matcher 为 `^compact$` 的 `SessionStart`，只负责订阅上下文恢复和有界 outbox 补发。
 3. 不用 Hook 守门 Agent 工具调用，不阻止用户结束任务，不制造 continuation，不重放原答复。
 4. 不自动监听后台任务，不在 Agent 停止后理解新事件。
@@ -157,13 +157,15 @@ delivery-failed
 
 Onboarding 最终拟写入当前 `CODEX_HOME` 中实际生效的全局 AGENTS 文件。目标选择规则见 7.4。托管内容为：
 
-> 仅顶层、直接面向用户的主 Agent 持续判断 Notify Me 内置条件。任务阻塞包括：必须向用户索取缺失信息、亲自授权、实质选择或外部操作，且用户响应前没有可继续的主线工作；严重风险指继续执行可能造成灾难性或大范围不可逆影响。命中任一条件时，必须在向用户提出请求或继续操作之前按需读取并调用 Notify Me，不得把阻塞当作普通澄清而跳过。普通问答、进度、完成、已获授权的常规敏感操作及任何子 Agent、委派 Agent、Ticket Worker 均不得调用。有效用户订阅由 Notify Me 的恢复 Hook 另行提供最小检查上下文。
+> 仅顶层、直接面向用户的主 Agent 持续判断 Notify Me 内置条件。任务阻塞包括：必须向用户索取缺失信息、亲自授权、实质选择或外部操作，且用户响应前没有可继续的主线工作；严重风险指继续执行可能造成灾难性或大范围不可逆影响。命中后无需读取 Notify Me Skill，直接以宿主提权模式调用托管规则中的固定入口；授权前缀精确限制为该入口。固定入口自动读取真实任务标题和项目归属。普通问答、进度、完成、已获授权的常规敏感操作及任何子 Agent、委派 Agent、Ticket Worker 均不得调用。有效用户订阅由 Notify Me 的恢复 Hook 另行提供最小检查上下文。
 
 规则使用带版本的托管块，避免重复和误删用户内容：
 
 ```md
-<!-- notify-me:managed:start version=2 -->
-仅顶层、直接面向用户的主 Agent 持续判断 Notify Me 内置条件。任务阻塞包括：必须向用户索取缺失信息、亲自授权、实质选择或外部操作，且用户响应前没有可继续的主线工作；严重风险指继续执行可能造成灾难性或大范围不可逆影响。命中任一条件时，必须在向用户提出请求或继续操作之前按需读取并调用 Notify Me，不得把阻塞当作普通澄清而跳过。普通问答、进度、完成、已获授权的常规敏感操作及任何子 Agent、委派 Agent、Ticket Worker 均不得调用。有效用户订阅由 Notify Me 的恢复 Hook 另行提供最小检查上下文。
+<!-- notify-me:managed:start version=3 -->
+仅顶层、直接面向用户的主 Agent 持续判断 Notify Me 内置条件。任务阻塞包括：必须向用户索取缺失信息、亲自授权、实质选择或外部操作，且用户响应前没有可继续的主线工作；严重风险指继续执行可能造成灾难性或大范围不可逆影响。
+命中后无需读取 Notify Me Skill，直接以宿主提权模式调用固定入口 <stable-launcher> send --condition-id blocking|severe-risk --item-id <稳定事项标识> --state <稳定语义状态> --action <面向用户的自然语言动作>；授权前缀必须精确限制为该固定入口。固定入口自动读取真实任务标题和项目归属。普通问答、进度、完成、已获授权的常规敏感操作及任何子 Agent、委派 Agent、Ticket Worker 均不得调用。
+只有返回 ok=true 且 status=accepted 时才可说 Bark 服务已接受；其他结果必须如实说明，不能声称已发送。
 <!-- notify-me:managed:end -->
 ```
 
@@ -173,7 +175,7 @@ Onboarding 最终拟写入当前 `CODEX_HOME` 中实际生效的全局 AGENTS �
 
 Codex 初始上下文只获得 Skill 的名称与描述，只有显式调用或模型判断请求匹配时才读取完整 `SKILL.md`。因此全局规则不得包含 `$notify-me`、`$notify-me check` 或“每轮调用”字样；这些写法会把 Notify Me 变成显式激活候选，破坏渐进式披露。
 
-全局规则只提供足够短的语义判断标准。主 Agent 判断某个已启用条件命中后，才读取 Notify Me Skill，并由 Skill 按需继续加载通知策略或执行确定性脚本。
+全局规则只提供足够短的语义判断标准和一个无版本号的稳定运行入口。主 Agent 判断内置条件命中后，直接执行该入口的 `send`，不读取完整 Skill；只有首次配置、配置错误或诊断时才加载 Skill。稳定入口由 Onboarding 从当前插件原子安装到 Notify Me 私有目录，插件更新时原子刷新，避免版本化缓存路径搜索和重复授权。
 
 ### 4.3 条件式双 Hook
 
@@ -269,8 +271,8 @@ Notify Me 默认使用已有 512×512 Codex 插图，不提供用户自定义图
 
 - 正文只写用户现在要做的具体动作或订阅结果，例如“请批准文件访问”或“测试已全部通过”。
 - 禁止发送背景日志、命令、工具参数、路径、Bark 地址、设备密钥、Token、个人数据或其他敏感内容。
-- 正常模式标题使用通知类型和宿主当前任务的真实可见标题；不得由 Agent 自行概括或改写。宿主无法可靠提供时只显示通知类型。
-- 当前任务明确归属于项目时，正文末尾追加 `（所属项目：<项目根文件夹名>）`；无项目会话省略，不得仅凭临时 cwd 猜测项目。
+- 正常模式由运行时从 Codex 任务索引读取宿主当前任务的真实可见标题；不得由 Agent 自行概括、改写或手工传参。宿主无法可靠提供时只显示通知类型。
+- 运行时从 Codex 的任务项目映射读取归属；明确归属于本地项目时，正文末尾追加 `（所属项目：<项目根文件夹名>）`；明确标记为无项目或元数据不可用时省略，不得仅凭临时 cwd 猜测项目。
 - `private` 模式忽略任务标题、项目名和具体行动，标题只保留通知类型，正文固定为“请查看 Codex 中待处理事项”。
 
 默认标题建议：
@@ -506,6 +508,7 @@ notify_me.py setup
 notify_me.py status
 notify_me.py doctor
 notify_me.py test --priority P1
+notify_me.py runtime install
 
 notify_me.py subscribe add --summary ... [--repeat] [--priority P2] [--effect-id ...]
 notify_me.py subscribe list
@@ -515,7 +518,7 @@ notify_me.py subscribe trigger --subscription-id ... --event-id ... --state ... 
 
 notify_me.py send --condition-id blocking|severe-risk|... \
   --event-id ... [--incident-id ...] --state ... --action ... \
-  [--task-title ...] [--project-name ...] [--private]
+  [--private]
 
 notify_me.py resolve --incident-id ...
 notify_me.py drain [--force]
@@ -724,7 +727,7 @@ Ticket 1 的目标不是发布完整插件，而是证明以下端到端链路�
 → 用户授权写入托管块
 → 新顶层任务加载规则
 → 构造一个明确的任务阻塞场景
-→ 主 Agent 按需读取 Notify Me 并发送固定 P1 通知
+→ 主 Agent 不加载 Skill，直接调用稳定入口发送固定 P1 通知
 → 用户手机看到通知
 ```
 
@@ -746,7 +749,7 @@ Ticket 1 的硬验收：
 2. SQLite 自动创建，无 Docker、数据库服务或手工 SQL。
 3. MVP 安装包不声明、不安装也不运行任何 Hook，并且不存在订阅创建或恢复入口。
 4. AGENTS override 优先级和“新任务才生效”得到真实验证。
-5. 新任务中的普通问答不加载或调用 Notify Me；明确阻塞时主 Agent 才按需读取 Skill 并调用。
+5. 新任务中的普通问答不加载或调用 Notify Me；明确阻塞时主 Agent 直接调用稳定入口，不加载完整 Skill。
 6. 本地 fake Bark 分别验证固定 P1 Blocking 和固定 P0 Severe Risk payload；随后用户在手机确认一条真实 P1 阻塞通知实际出现。
 7. Subagent/Ticket Worker 负向场景不发送。
 8. 不包含 Stop、每轮 `$notify-me check`、`UserPromptSubmit`、`SessionStart` 或工具调用守门。
@@ -799,7 +802,7 @@ Ticket 1 通过前不拆实现型后续 Ticket；可以记录候选 backlog，�
 - 用户确认至少一条默认 P1 测试在手机实际出现；
 - 用户把 P1 默认效果改为 critical，或给某个条件设置 Critical 覆盖时，真实发送并确认预期声音/打扰效果；
 - 匿名验证 icon URL 与本地资产一致，并由用户目视确认 Bark 展示图标；
-- 新建 Codex 顶层任务，验证没有条件命中时不会完整加载或调用 Notify Me Skill；
+- 新建 Codex 顶层任务，验证没有条件命中时不会加载或调用 Notify Me；命中内置条件时直接调用稳定入口且不完整加载 Skill；
 - 构造需要用户信息、需要用户亲自授权、严重风险、订阅满足各一个有界场景；
 - 验证普通问答、普通进度、正常完成和 Ticket Worker 均不发送；
 - 验证无订阅时双 Hook 不增加上下文；有订阅时 UserPromptSubmit 与同轮 SessionStart(compact) 均恢复相同 revision，且不产生 continuation；

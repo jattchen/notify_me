@@ -25,6 +25,7 @@ class StoragePaths:
     config_dir: Path
     state_db: Path
     dotenv: Path
+    launcher: Path
 
 
 def resolve_storage_paths(env=None):
@@ -38,7 +39,12 @@ def resolve_storage_paths(env=None):
         config_dir = Path.home() / "Library" / "Application Support" / "notify-me"
     else:
         config_dir = Path(values.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "notify-me"
-    return StoragePaths(config_dir, config_dir / "state.sqlite3", config_dir / ".env")
+    return StoragePaths(
+        config_dir,
+        config_dir / "state.sqlite3",
+        config_dir / ".env",
+        config_dir / "bin" / "notify-me",
+    )
 
 
 def _now():
