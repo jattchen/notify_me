@@ -88,6 +88,17 @@ class MvpPackageContractTests(unittest.TestCase):
         self.assertIn("onboarding confirm", skill)
         self.assertNotIn("每轮", skill)
 
+    def test_skill_requires_narrow_escalation_and_never_claims_failed_delivery(self):
+        root = Path(__file__).resolve().parents[1]
+        skill = (root / "skills" / "notify-me" / "SKILL.md").read_text()
+
+        self.assertIn("精确到当前安装态入口", skill)
+        self.assertIn("可复用授权", skill)
+        self.assertIn("不得申请宽泛的 `python3` 前缀", skill)
+        self.assertIn("`ok=false`", skill)
+        self.assertIn("不得声称已发送", skill)
+        self.assertIn("`status=accepted`", skill)
+
     def test_installed_skill_wrapper_runs_from_a_non_repository_cwd(self):
         root = Path(__file__).resolve().parents[1]
         wrapper = root / "skills" / "notify-me" / "scripts" / "notify_me.py"

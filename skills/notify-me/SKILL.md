@@ -23,6 +23,19 @@ python3 <notify-me-skill>/scripts/notify_me.py agents-rule commit --authorize
 
 `setup` 的提示是终端私密输入；Bark 完整推送 URL 不得进入对话、命令参数、日志或状态库。`test` 只代表 Bark 服务已接受，只有用户确认手机实际出现测试通知后，才调用 `onboarding confirm`。
 
+## 权限与执行结果合同
+
+`onboarding inspect`、`agents-rule plan` 和只读状态检查可以在普通沙箱中运行。初始化、绑定、测试、确认、规则写入、`activation verify` 和 `send` 会写入 workspace 外的 Notify Me 私有状态；`test` 与 `send` 还需要 Bark 网络访问。执行这些命令时必须使用宿主的提权/授权模式。
+
+Onboarding 第一次申请这类权限时，应请求一条可复用授权，命令前缀必须精确到当前安装态入口，例如 `python3 <notify-me-skill>/scripts/notify_me.py`；不得申请宽泛的 `python3` 前缀，也不得扩大到其他脚本。后续 `send` 仍必须按提权模式发起，由已批准的精确前缀免去重复打扰。若当前安装版本变化，应重新申请新入口的窄授权。
+
+每次命令都必须等待进程结束并解析 JSON，遵守以下结果合同：
+
+- 只有 `ok=true` 且 `status=accepted` 时，才可以说“Bark 服务已接受”；这仍不等于手机已显示。
+- `status=deduplicated` 表示没有新发 Bark；`status=suppressed` 表示非主通知者被抑制；`status=failed` 表示服务未接受。三者都不得声称已发送。
+- 任何非零退出、无 JSON 或 `ok=false` 都不得声称已发送，也不得在未说明失败的情况下继续向用户索取信息。
+- 若错误为 `state_write_error` 且 `requires_permission_retry=true`，立即申请上述私有状态写入与 Bark 网络权限，使用完全相同的 `item-id` 和 `state` 重试一次；再次失败则明确报告通知失败及错误码。
+
 只有当前顶层、直接面向用户的主 Agent 在明确判断任务确实阻塞或出现需要立即介入的严重风险时，才按条件调用。必须向用户索取缺失信息、亲自授权、实质选择或外部操作，并且用户响应前没有可继续的主线工作，属于 Blocking；必须在向用户提出请求的同一轮先发送通知，不得把它当作普通澄清而跳过：
 
 ```text

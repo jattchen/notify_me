@@ -336,7 +336,15 @@ def run_cli(argv, env=None, transport=None, secret_reader=None, sleep=None):
             result["ok"] = True
         return result
     except NotifyMeError as exc:
-        return {"ok": False, "error": {"code": exc.code, "message": exc.safe_message}}
+        error = {"code": exc.code, "message": exc.safe_message}
+        if exc.code == "state_write_error":
+            error.update(
+                {
+                    "requires_permission_retry": True,
+                    "next_action": "request_private_state_and_network_permission_then_retry_once",
+                }
+            )
+        return {"ok": False, "error": error}
     except (EOFError, OSError, ValueError, TypeError):
         return {"ok": False, "error": {"code": "internal_error", "message": "操作未完成"}}
 

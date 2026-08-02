@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 from notify_me.cli import run_cli
@@ -63,6 +64,47 @@ class MvpActivationTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.code, "scope_conflict")
+
+    def test_state_write_failure_returns_a_permission_retry_contract_without_transport(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "permission-contract-scope",
+                "CODEX_THREAD_ID": None,
+            }
+            fake = FakeBarkTransport()
+            self.prepare_active(env, fake)
+
+            with patch(
+                "notify_me.storage.StateStore.record_notification",
+                side_effect=NotifyMeError("state_write_error", "无法记录通知状态"),
+            ):
+                result = run_cli(
+                    [
+                        "send",
+                        "--condition-id",
+                        "blocking",
+                        "--item-id",
+                        "permission-contract-item",
+                        "--state",
+                        "waiting-for-user",
+                        "--action",
+                        "请提供所需信息",
+                    ],
+                    env=env,
+                    transport=fake,
+                )
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["error"]["code"], "state_write_error")
+            self.assertTrue(result["error"]["requires_permission_retry"])
+            self.assertEqual(
+                result["error"]["next_action"],
+                "request_private_state_and_network_permission_then_retry_once",
+            )
+            self.assertEqual(len(fake.payloads), 1)
 
     def test_initialize_creates_private_sqlite_state_without_a_service(self):
         with tempfile.TemporaryDirectory() as temp_dir:
