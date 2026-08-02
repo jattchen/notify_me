@@ -1,5 +1,6 @@
 import io
 import json
+import socket
 import unittest
 import urllib.error
 
@@ -131,3 +132,31 @@ class BarkTransportContractTests(unittest.TestCase):
         ).send(endpoint, {"device_key": endpoint.key, "title": "test"})
         self.assertFalse(bark_rejected.retryable)
         self.assertEqual(bark_rejected.category, "bark_rejected")
+
+    def test_timeout_and_empty_response_are_retryable_without_exposing_error_text(self):
+        endpoint = self.endpoint()
+        timeout = BarkTransport(
+            timeout=1,
+            opener=_Opener(error=socket.timeout("secret endpoint and key")),
+        ).send(endpoint, {"device_key": endpoint.key, "title": "prompt secret"})
+        empty = BarkTransport(
+            timeout=1,
+            opener=_Opener(_Response(200, b"")),
+        ).send(endpoint, {"device_key": endpoint.key, "title": "prompt secret"})
+
+        self.assertEqual(timeout.category, "network_error")
+        self.assertTrue(timeout.retryable)
+        self.assertEqual(empty.category, "invalid_response")
+        self.assertTrue(empty.retryable)
+
+    def test_redirect_status_response_is_rejected_without_following_it(self):
+        endpoint = self.endpoint()
+        opener = _Opener(_Response(307, b"redirect contains secret"))
+
+        result = BarkTransport(timeout=1, opener=opener).send(
+            endpoint, {"device_key": endpoint.key, "title": "prompt secret"}
+        )
+
+        self.assertEqual(result.category, "redirect_rejected")
+        self.assertFalse(result.retryable)
+        self.assertEqual(len(opener.requests), 1)

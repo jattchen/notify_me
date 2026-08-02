@@ -78,3 +78,16 @@ class MvpPackageContractTests(unittest.TestCase):
         self.assertIn("--condition-id blocking", skill)
         self.assertIn("onboarding confirm", skill)
         self.assertNotIn("每轮", skill)
+
+    def test_skill_and_manifest_describe_both_fixed_conditions_without_hooks(self):
+        root = Path(__file__).resolve().parents[1]
+        skill = (root / "skills" / "notify-me" / "SKILL.md").read_text()
+        manifest = json.loads((root / ".codex-plugin" / "plugin.json").read_text())
+
+        self.assertIn("severe-risk", skill)
+        self.assertIn("P0", skill)
+        self.assertIn("P1", skill)
+        self.assertIn("可自动恢复", skill)
+        self.assertIn("Agent 即将结束", skill)
+        self.assertNotIn("hooks", manifest)
+        self.assertFalse((root / "hooks").exists())

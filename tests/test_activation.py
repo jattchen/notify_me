@@ -97,6 +97,33 @@ class AgentsRuleActivationTests(unittest.TestCase):
             self.assertEqual(result["error"]["code"], "agents_changed")
             self.assertEqual(agents.read_text(encoding="utf-8"), "changed by user\n")
 
+    def test_override_created_during_authorization_stops_before_writing_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            self.prepare_activation(env)
+            codex_home = Path(env["CODEX_HOME"])
+            codex_home.mkdir()
+            default = codex_home / "AGENTS.md"
+            override = codex_home / "AGENTS.override.md"
+            default.write_text("default\n", encoding="utf-8")
+            plan = run_cli(["agents-rule", "plan"], env=env)
+            override.write_text("override appeared\n", encoding="utf-8")
+
+            result = run_cli(
+                [
+                    "agents-rule",
+                    "commit",
+                    "--authorize",
+                    "--expected-sha256",
+                    plan["current_sha256"],
+                ],
+                env=env,
+            )
+
+            self.assertEqual(result["error"]["code"], "agents_changed")
+            self.assertEqual(default.read_text(encoding="utf-8"), "default\n")
+            self.assertEqual(override.read_text(encoding="utf-8"), "override appeared\n")
+
     def test_symlink_and_duplicate_markers_are_refused(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             env = self.environment(temp_dir)
@@ -168,3 +195,62 @@ class AgentsRuleActivationTests(unittest.TestCase):
             self.assertFalse(same_scope["task_scope_verified"])
             self.assertEqual(different_scope["status"], "active")
             self.assertTrue(different_scope["task_scope_verified"])
+
+    def test_repeating_activation_is_idempotent_and_does_not_send_another_test(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            fake = FakeBarkTransport()
+            run_cli(["onboarding", "initialize"], env=env)
+            run_cli(
+                ["setup"],
+                env=env,
+                secret_reader=lambda prompt: "https://bark.example/Abcdef12_key",
+            )
+            self.assertEqual(
+                run_cli(["test"], env=env, transport=fake)["status"], "delivered"
+            )
+            self.assertEqual(
+                run_cli(["onboarding", "confirm"], env=env)["status"],
+                "test-confirmed",
+            )
+            codex_home = Path(env["CODEX_HOME"])
+            codex_home.mkdir()
+            agents = codex_home / "AGENTS.md"
+            agents.write_text("user\n", encoding="utf-8")
+
+            first = run_cli(["agents-rule", "commit", "--authorize"], env=env)
+            self.assertTrue(first["ok"], first)
+            first_content = agents.read_bytes()
+
+            repeated = run_cli(["agents-rule", "commit", "--authorize"], env=env)
+            self.assertTrue(repeated["ok"], repeated)
+            self.assertFalse(repeated["changed"])
+            self.assertEqual(agents.read_bytes(), first_content)
+
+            env["NOTIFY_ME_TEST_SCOPE"] = "new-task"
+            activated = run_cli(
+                ["activation", "verify", "--new-task"], env=env
+            )
+            self.assertEqual(activated["status"], "active")
+            self.assertEqual(len(fake.payloads), 1)
+
+    def test_drift_stops_without_a_replacement_command(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            self.prepare_activation(env)
+            codex_home = Path(env["CODEX_HOME"])
+            codex_home.mkdir()
+            agents = codex_home / "AGENTS.md"
+            agents.write_text("before\n" + MANAGED_BLOCK + "\n", encoding="utf-8")
+            agents.write_text(
+                "before\n" + MANAGED_BLOCK.replace("任务阻塞", "用户阻塞") + "\n",
+                encoding="utf-8",
+            )
+
+            result = run_cli(
+                ["agents-rule", "commit", "--authorize"],
+                env=env,
+            )
+
+            self.assertEqual(result["error"]["code"], "managed_block_drift")
+            self.assertIn("用户阻塞", agents.read_text(encoding="utf-8"))

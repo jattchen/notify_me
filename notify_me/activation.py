@@ -147,7 +147,7 @@ def plan_agents_rule(env=None):
         "impact": {
             "original_bytes": len(target.data),
             "result_bytes": len(result_bytes),
-            "only_managed_block_changes": True,
+            "only_managed_block_changes": info["status"] != "drifted",
         },
     }
 
@@ -188,10 +188,11 @@ def _atomic_write(path, data, mode):
                 pass
 
 
-def commit_agents_rule(env=None, authorize=False, expected_sha256=None, replace_drift=False):
+def commit_agents_rule(env=None, authorize=False, expected_sha256=None):
     if not authorize:
         raise NotifyMeError("explicit_authorization_required", "写入托管规则必须明确授权")
-    target = effective_agents(os.environ if env is None else env)
+    values = os.environ if env is None else env
+    target = effective_agents(values)
     if target.is_symlink:
         raise NotifyMeError("unsafe_agents_target", "生效的 AGENTS 文件不能是符号链接")
     if target.exists and not target.is_regular:
@@ -200,9 +201,20 @@ def commit_agents_rule(env=None, authorize=False, expected_sha256=None, replace_
     if expected_sha256 and expected_sha256 != current_hash:
         raise NotifyMeError("agents_changed", "生效的 AGENTS 文件在授权前发生变化")
     info = _managed_block_info(target.data)
-    if info["status"] == "drifted" and not replace_drift:
+    if info["status"] == "drifted":
         raise NotifyMeError("managed_block_drift", "Notify Me 托管块已被修改，拒绝覆盖")
     candidate = _candidate_content(info).encode("utf-8")
+    latest_effective = effective_agents(values)
+    if (
+        latest_effective.path != target.path
+        or latest_effective.source != target.source
+    ):
+        raise NotifyMeError("agents_changed", "生效的 AGENTS 文件在授权前发生变化")
+    latest = _read_candidate(target.path, target.source)
+    if latest.is_symlink or (latest.exists and not latest.is_regular):
+        raise NotifyMeError("unsafe_agents_target", "生效的 AGENTS 文件在写入前变得不安全")
+    if latest.exists != target.exists or latest.data != target.data:
+        raise NotifyMeError("agents_changed", "生效的 AGENTS 文件在授权前发生变化")
     if candidate != target.data:
         _atomic_write(target.path, candidate, target.mode if target.exists else 0o600)
     try:

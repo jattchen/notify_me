@@ -282,17 +282,15 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
             new_task = _bool_option(options, "new-task") if "new-task" in options else False
             result = verify_agents_rule(env, new_task=new_task)
             return {"ok": True, **_verify_rule_activation(store, env, result)}
-        allowed = {"authorize", "yes", "expected-sha256", "replace-drift"}
+        allowed = {"authorize", "yes", "expected-sha256"}
         if set(options) - allowed:
             raise NotifyMeError("invalid_arguments", "commit 参数不受支持")
         store.require_initialized()
-        if store.get_setting("onboarding_state") != "test-confirmed":
+        onboarding_state = store.get_setting("onboarding_state")
+        if onboarding_state not in ("test-confirmed", "restart-required", "active"):
             raise NotifyMeError("activation_step_required", "请先确认 P1 测试通知后再写入托管规则")
         authorize = ("authorize" in options and _bool_option(options, "authorize")) or (
             "yes" in options and _bool_option(options, "yes")
-        )
-        replace_drift = (
-            _bool_option(options, "replace-drift") if "replace-drift" in options else False
         )
         expected = options.get("expected-sha256")
         if expected is not None and (
@@ -308,10 +306,10 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
                 env,
                 authorize=authorize,
                 expected_sha256=expected,
-                replace_drift=replace_drift,
             ),
         }
-        _record_rule_install(store, env)
+        if onboarding_state == "test-confirmed" or result["changed"]:
+            _record_rule_install(store, env)
         return result
 
     if command in ("status", "doctor"):

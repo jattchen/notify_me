@@ -8,10 +8,10 @@ import re
 import tempfile
 
 from .constants import (
+    CONDITION_EFFECTS,
     CONDITION_PRIORITY,
     CONDITION_TITLES,
     ICON_URL,
-    P1_EFFECT,
 )
 from .errors import NotifyMeError
 from .storage import StateStore
@@ -21,10 +21,30 @@ from .transport import BarkEndpoint
 _SAFE_ACTION = re.compile(r"[^\r\n]{1,160}$")
 _WORKER_ROLES = {
     "subagent",
+    "sub-agent",
+    "delegated-agent",
+    "delegate-agent",
+    "delegate",
+    "delegated",
     "ticket-worker",
+    "ticketworker",
     "worker",
     "coordinator-managed-worker",
+    "coordinator-managed-ticket-worker",
 }
+
+_DELIVERY_ACTIONS = {
+    "retryable_http": "请检查 Bark 服务后稍后重新运行此通知流程。",
+    "network_error": "请检查网络和 Bark 服务后稍后重新运行此通知流程。",
+    "invalid_response": "请检查 Bark 服务版本或代理响应后重试。",
+    "redirect_rejected": "请检查 Bark 地址是否直接指向服务，Notify Me 不跟随重定向。",
+    "permanent_http": "请检查 Bark 地址和服务状态后重新绑定。",
+    "bark_rejected": "请检查 Bark 服务返回的配置或负载错误后重试。",
+}
+
+
+def _delivery_next_action(category):
+    return _DELIVERY_ACTIONS.get(category, "请检查 Bark 服务后重新运行此通知流程。")
 
 
 def _canonical_json(value):
@@ -67,7 +87,7 @@ def resolve_scope(env):
 def actor_is_suppressed(actor_role=None, worker_id=None, env=None):
     values = os.environ if env is None else env
     role_value = actor_role or values.get("NOTIFY_ME_ACTOR_ROLE") or "main"
-    role = role_value.strip().lower() if isinstance(role_value, str) else "main"
+    role = role_value.strip().lower().replace("_", "-") if isinstance(role_value, str) else "main"
     known_worker = worker_id or values.get("NOTIFY_ME_WORKER_ID")
     return role in _WORKER_ROLES or bool(known_worker)
 
@@ -101,7 +121,7 @@ def build_payload(endpoint, condition_id, notification_id, action, private=False
         "Notify Me｜请查看 Codex" if private else CONDITION_TITLES[condition_id],
         _body(action, private),
         notification_id,
-        P1_EFFECT,
+        CONDITION_EFFECTS[condition_id],
     )
 
 
@@ -111,7 +131,7 @@ def build_test_payload(endpoint):
         "Notify Me｜连接测试",
         "Notify Me 测试通知：请确认手机是否收到。",
         "notify-me-test-p1",
-        P1_EFFECT,
+        CONDITION_EFFECTS["blocking"],
     )
 
 
@@ -193,6 +213,7 @@ def send_test(store, endpoint, transport, sleep=None):
         "http_status": result.http_status,
         "attempts": result.attempts,
         "message": "Bark 服务未接受通知",
+        "next_action": _delivery_next_action(result.category),
     }
 
 
@@ -201,7 +222,7 @@ def send_condition(store, endpoint, transport, condition_id, event_id, state, ac
     if actor_is_suppressed(actor_role, worker_id, values):
         return {"status": "suppressed", "reason": "not_primary_notifier"}
     if condition_id not in CONDITION_PRIORITY:
-        raise NotifyMeError("invalid_condition", "MVP 只支持 blocking")
+        raise NotifyMeError("invalid_condition", "MVP 只支持 blocking 或 severe-risk")
     if not isinstance(event_id, str) or not event_id or len(event_id) > 256:
         raise NotifyMeError("invalid_event", "通知事件标识无效")
     if not isinstance(state, str) or not state or len(state) > 256:
@@ -214,7 +235,7 @@ def send_condition(store, endpoint, transport, condition_id, event_id, state, ac
     event_state_key = hmac.new(
         scope_key.encode("ascii"), state.encode("utf-8"), hashlib.sha256
     ).hexdigest()
-    effect = P1_EFFECT
+    effect = CONDITION_EFFECTS[condition_id]
     effect_fingerprint = _fingerprint(effect)
     notification_id = "nm_" + hmac.new(
         scope_key.encode("ascii"),
@@ -262,6 +283,7 @@ def send_condition(store, endpoint, transport, condition_id, event_id, state, ac
     if not result.accepted:
         response["retryable"] = result.retryable
         response["http_status"] = result.http_status
+        response["next_action"] = _delivery_next_action(result.category)
     return response
 
 

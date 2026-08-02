@@ -8,7 +8,7 @@ from pathlib import Path
 from notify_me.cli import run_cli
 from notify_me.errors import NotifyMeError
 from notify_me.runtime import resolve_scope
-from notify_me.transport import FakeBarkTransport
+from notify_me.transport import FakeBarkTransport, TransportResult
 
 
 class MvpActivationTests(unittest.TestCase):
@@ -219,6 +219,134 @@ class MvpActivationTests(unittest.TestCase):
             state_bytes = Path(env["NOTIFY_ME_CONFIG_DIR"], "state.sqlite3").read_bytes()
             self.assertNotIn(b"waiting-for-approval", state_bytes)
 
+    def test_severe_risk_uses_the_fixed_minimal_p0_payload(self):
+        fake = FakeBarkTransport()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "fixture-scope-01",
+                "CODEX_THREAD_ID": None,
+            }
+            self.prepare_active(env, fake)
+
+            severe = run_cli(
+                [
+                    "send",
+                    "--condition-id",
+                    "severe-risk",
+                    "--event-id",
+                    "event-severe-1",
+                    "--state",
+                    "rollback-guarantee-lost",
+                    "--action",
+                    "请立即确认是否停止操作",
+                ],
+                env=env,
+                transport=fake,
+            )
+
+            self.assertEqual(severe["status"], "delivered")
+            self.assertEqual(severe["condition_id"], "severe-risk")
+            self.assertEqual(severe["priority"], "P0")
+            p0 = fake.payloads[-1]
+            self.assertEqual(p0["level"], "critical")
+            self.assertEqual(p0["sound"], "alarm")
+            self.assertEqual(p0["volume"], 8)
+            self.assertEqual(p0["group"], "codex")
+            self.assertNotIn("call", p0)
+            self.assertNotIn("event-severe-1", json.dumps(severe, ensure_ascii=False))
+            state_bytes = Path(env["NOTIFY_ME_CONFIG_DIR"], "state.sqlite3").read_bytes()
+            self.assertNotIn(b"rollback-guarantee-lost", state_bytes)
+
+    def test_non_primary_actor_roles_are_stably_suppressed(self):
+        fake = FakeBarkTransport()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "fixture-scope-01",
+                "CODEX_THREAD_ID": None,
+            }
+            self.prepare_active(env, fake)
+            payload_count = len(fake.payloads)
+
+            for role in (
+                "subagent",
+                "delegated-agent",
+                "ticket-worker",
+                "coordinator-managed-ticket-worker",
+                "worker",
+            ):
+                with self.subTest(role=role):
+                    result = run_cli(
+                        [
+                            "send",
+                            "--condition-id",
+                            "severe-risk",
+                            "--event-id",
+                            "worker-event",
+                            "--state",
+                            "worker-state",
+                            "--action",
+                            "不应直接通知用户",
+                            "--actor-role",
+                            role,
+                        ],
+                        env=env,
+                        transport=fake,
+                    )
+                    self.assertEqual(
+                        result,
+                        {
+                            "ok": True,
+                            "status": "suppressed",
+                            "reason": "not_primary_notifier",
+                        },
+                    )
+            self.assertEqual(len(fake.payloads), payload_count)
+
+    def test_default_non_notification_cases_do_not_send(self):
+        fake = FakeBarkTransport()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "fixture-scope-01",
+                "CODEX_THREAD_ID": None,
+            }
+            self.prepare_active(env, fake)
+
+            for condition in (
+                "ordinary-question",
+                "progress",
+                "complete",
+                "recoverable",
+                "agent-ending",
+            ):
+                with self.subTest(condition=condition):
+                    result = run_cli(
+                        [
+                            "send",
+                            "--condition-id",
+                            condition,
+                            "--event-id",
+                            "non-notification-event",
+                            "--state",
+                            "non-notification-state",
+                            "--action",
+                            "不应发送",
+                        ],
+                        env=env,
+                        transport=fake,
+                    )
+                    self.assertFalse(result["ok"])
+                    self.assertEqual(result["error"]["code"], "invalid_condition")
+            self.assertEqual(len(fake.payloads), 1)
+
     def test_same_event_and_state_is_deduplicated_without_a_second_push(self):
         fake = FakeBarkTransport()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -249,6 +377,49 @@ class MvpActivationTests(unittest.TestCase):
             self.assertEqual(first["status"], "delivered")
             self.assertEqual(second["status"], "deduplicated")
             self.assertEqual(len(fake.payloads), payloads_before + 1)
+
+    def test_delivery_failures_are_actionable_and_do_not_echo_sensitive_inputs(self):
+        accepted = FakeBarkTransport()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "scope-secret-01",
+                "CODEX_THREAD_ID": None,
+            }
+            self.prepare_active(env, accepted)
+            failed = FakeBarkTransport(
+                result=TransportResult(False, True, "network_error")
+            )
+            result = run_cli(
+                [
+                    "send",
+                    "--condition-id",
+                    "blocking",
+                    "--event-id",
+                    "event-secret-01",
+                    "--state",
+                    "prompt-secret-state",
+                    "--action",
+                    "用户 prompt 中不应回显的内容",
+                ],
+                env=env,
+                transport=failed,
+            )
+
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(result["category"], "network_error")
+            self.assertIn("next_action", result)
+            serialized = json.dumps(result, ensure_ascii=False)
+            for secret in (
+                "scope-secret-01",
+                "event-secret-01",
+                "prompt-secret-state",
+                "用户 prompt 中不应回显的内容",
+                "Abcdef12_key",
+            ):
+                self.assertNotIn(secret, serialized)
 
 
 if __name__ == "__main__":

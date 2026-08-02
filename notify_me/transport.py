@@ -174,8 +174,10 @@ class BarkTransport:
             status = getattr(response, "status", None)
             if status is None:
                 status = response.getcode()
-            body = response.read(65537)
-            response.close()
+            try:
+                body = response.read(65537)
+            finally:
+                response.close()
         except urllib.error.HTTPError as exc:
             status = exc.code
             try:
@@ -189,11 +191,11 @@ class BarkTransport:
         if status < 200 or status >= 300:
             retryable, category = _classify_http_status(status)
             return TransportResult(False, retryable, category, status)
-        if len(body) > 65536 or not body:
+        if not isinstance(body, (bytes, bytearray)) or len(body) > 65536 or not body:
             return TransportResult(False, True, "invalid_response", status)
         try:
             response_json = json.loads(body.decode("utf-8"))
-        except (UnicodeDecodeError, ValueError, TypeError):
+        except (UnicodeDecodeError, ValueError, TypeError, AttributeError):
             return TransportResult(False, True, "invalid_response", status)
         if not isinstance(response_json, dict):
             return TransportResult(False, True, "invalid_response", status)

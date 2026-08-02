@@ -9,7 +9,13 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .constants import SCHEMA_CHECKSUM, SCHEMA_SQL, SCHEMA_VERSION
+from .constants import (
+    NOTIFICATIONS_INDEX_SQL,
+    NOTIFICATIONS_TABLE_SQL,
+    SCHEMA_CHECKSUM,
+    SCHEMA_SQL,
+    SCHEMA_VERSION,
+)
 from .errors import NotifyMeError
 
 
@@ -69,6 +75,25 @@ def _connect(path):
     return connection
 
 
+def _create_current_schema(connection):
+    for statement in SCHEMA_SQL.splitlines():
+        connection.execute(statement)
+
+
+def _migrate_v1_to_v2(connection):
+    """Expand the fixed-condition check without losing MVP notification rows."""
+
+    connection.execute("DROP INDEX IF EXISTS notifications_event_identity")
+    connection.execute("ALTER TABLE notifications RENAME TO notifications_v1")
+    connection.execute(NOTIFICATIONS_TABLE_SQL)
+    connection.execute(
+        "INSERT INTO notifications(notification_id, scope_key, condition_key, event_key, event_state_key, effect_fingerprint, status, created_at, updated_at, attempts, http_status, last_error) "
+        "SELECT notification_id, scope_key, condition_key, event_key, event_state_key, effect_fingerprint, status, created_at, updated_at, attempts, http_status, last_error FROM notifications_v1"
+    )
+    connection.execute(NOTIFICATIONS_INDEX_SQL)
+    connection.execute("DROP TABLE notifications_v1")
+
+
 class StateStore:
     """One small facade; callers do not depend on table layout."""
 
@@ -88,21 +113,23 @@ class StateStore:
             ).fetchone()[0]
             if current > SCHEMA_VERSION:
                 raise NotifyMeError("state_schema_too_new", "本地状态库由更新版本创建")
+            if current == 0:
+                _create_current_schema(connection)
+            elif current == 1:
+                _migrate_v1_to_v2(connection)
             if current < SCHEMA_VERSION:
-                for statement in SCHEMA_SQL.splitlines():
-                    connection.execute(statement)
                 connection.execute(
                     "INSERT INTO schema_migrations(version, checksum, applied_at) VALUES (?, ?, ?)",
                     (SCHEMA_VERSION, SCHEMA_CHECKSUM, _now()),
                 )
-                connection.execute(
-                    "INSERT OR IGNORE INTO settings(key, value_json, updated_at) VALUES (?, ?, ?)",
-                    ("scope_salt", json.dumps(secrets.token_hex(32)), _now()),
-                )
-                connection.execute(
-                    "INSERT OR IGNORE INTO settings(key, value_json, updated_at) VALUES (?, ?, ?)",
-                    ("onboarding_state", json.dumps("unconfigured"), _now()),
-                )
+            connection.execute(
+                "INSERT OR IGNORE INTO settings(key, value_json, updated_at) VALUES (?, ?, ?)",
+                ("scope_salt", json.dumps(secrets.token_hex(32)), _now()),
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO settings(key, value_json, updated_at) VALUES (?, ?, ?)",
+                ("onboarding_state", json.dumps("unconfigured"), _now()),
+            )
             connection.commit()
         except NotifyMeError:
             connection.rollback()
