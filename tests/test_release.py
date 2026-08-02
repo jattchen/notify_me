@@ -99,6 +99,18 @@ class MvpPackageContractTests(unittest.TestCase):
         self.assertIn("不得声称已发送", skill)
         self.assertIn("`status=accepted`", skill)
 
+    def test_skill_defines_a_single_send_fast_path_without_version_search(self):
+        root = Path(__file__).resolve().parents[1]
+        skill = (root / "skills" / "notify-me" / "SKILL.md").read_text()
+
+        self.assertIn("宿主技能清单提供的精确 `SKILL.md` 路径", skill)
+        self.assertIn("不得扫描或猜测其他安装目录和版本号", skill)
+        self.assertIn("正常触发快路径", skill)
+        self.assertIn("只执行一次 `send`", skill)
+        self.assertIn("不得先执行 `onboarding inspect`", skill)
+        self.assertIn("面向用户的自然语言", skill)
+        self.assertIn("不得使用 slug", skill)
+
     def test_installed_skill_wrapper_runs_from_a_non_repository_cwd(self):
         root = Path(__file__).resolve().parents[1]
         wrapper = root / "skills" / "notify-me" / "scripts" / "notify_me.py"

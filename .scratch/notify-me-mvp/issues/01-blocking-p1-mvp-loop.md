@@ -22,3 +22,5 @@
 已集成提交：`5f5ba29fa94e5484d202021e80eb1cf2e135e7b4`。
 
 协调器在集成后的 `main` 上复跑 `python3 -m unittest discover -s tests -v`，21/21 通过；Python 编译检查和 `git diff --check` 通过。真实 Bark 服务与手机可见性由人工验收阶段确认。
+
+2026-08-03 真机验收完成：用户在新顶层任务中构造“缺少准确四位确认码且不可猜测”的真实 Blocking 场景；主 Agent 在索取信息前调用 Notify Me，返回 `ok=true`、`status=accepted`、`attempts=1`，用户确认手机实际收到固定 P1 Bark 通知。全局规则验活状态为 `active`，该测试未修改项目内 AGENTS 文件。

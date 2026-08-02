@@ -376,6 +376,39 @@ class MvpActivationTests(unittest.TestCase):
             state_bytes = Path(env["NOTIFY_ME_CONFIG_DIR"], "state.sqlite3").read_bytes()
             self.assertNotIn(b"waiting-for-approval", state_bytes)
 
+    def test_machine_slug_action_is_rejected_before_transport(self):
+        fake = FakeBarkTransport()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "fixture-scope-01",
+                "CODEX_THREAD_ID": None,
+            }
+            self.prepare_active(env, fake)
+            payload_count = len(fake.payloads)
+
+            result = run_cli(
+                [
+                    "send",
+                    "--condition-id",
+                    "blocking",
+                    "--item-id",
+                    "confirmation-code-required",
+                    "--state",
+                    "awaiting-user-confirmation-code",
+                    "--action",
+                    "provide-the-exact-four-digit-confirmation-code",
+                ],
+                env=env,
+                transport=fake,
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["error"]["code"], "invalid_action")
+            self.assertEqual(len(fake.payloads), payload_count)
+
     def test_severe_risk_uses_the_fixed_minimal_p0_payload(self):
         fake = FakeBarkTransport()
         with tempfile.TemporaryDirectory() as temp_dir:

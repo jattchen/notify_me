@@ -19,6 +19,7 @@ from .transport import BarkEndpoint
 
 
 _SAFE_ACTION = re.compile(r"[^\r\n]{1,160}$")
+_MACHINE_ACTION = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+){2,}$")
 _WORKER_ROLES = {
     "subagent",
     "sub-agent",
@@ -103,6 +104,11 @@ def _body(action, private):
         return "请查看 Codex 中待处理事项"
     if not isinstance(action, str) or not _SAFE_ACTION.fullmatch(action):
         raise NotifyMeError("invalid_action", "通知动作必须是一行不超过 160 字符的文本")
+    if _MACHINE_ACTION.fullmatch(action):
+        raise NotifyMeError(
+            "invalid_action",
+            "通知动作必须是面向用户的自然语言，不能使用内部 slug 或标识符",
+        )
     return action
 
 

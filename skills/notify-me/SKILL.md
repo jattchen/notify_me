@@ -7,7 +7,7 @@ description: "Notify Me MVP：私密绑定 Bark，并在主 Agent 判断任务�
 
 Notify Me 只负责本地激活、私密 Bark 绑定和通知投递。MVP 固定提供两个内置条件：`blocking` 使用 P1，`severe-risk` 使用 P0；两者默认启用且不可调整。它不管理任务标题、置顶、归档或生命周期，也不自动判断普通问答、进度或完成结果。
 
-以下命令中的 `<notify-me-skill>` 指安装态 Skill 目录的绝对路径；入口是其中的 `scripts/notify_me.py`。不要从调用者 cwd 猜测仓库根入口。
+以下命令中的 `<notify-me-skill>` 指当前这份 `SKILL.md` 所在的安装态 Skill 目录，入口是其中的 `scripts/notify_me.py`。必须直接使用宿主技能清单提供的精确 `SKILL.md` 路径并取其父目录；不得使用记忆中的旧版本号，不得扫描或猜测其他安装目录和版本号，也不要从调用者 cwd 猜测仓库根入口。如果宿主没有提供可读取的精确路径，应报告 Skill 加载失败，不能用 `rg`、`find` 或候选目录探测来修复。
 
 首次使用只按顺序调用：
 
@@ -42,6 +42,10 @@ Onboarding 第一次申请这类权限时，应请求一条可复用授权，命
 python3 <notify-me-skill>/scripts/notify_me.py send --condition-id blocking --item-id <item> --state <state> --action <action>
 python3 <notify-me-skill>/scripts/notify_me.py send --condition-id severe-risk --item-id <item> --state <state> --action <action>
 ```
+
+正常触发快路径：Skill 已加载且用户已完成 Onboarding 时，直接只执行一次 `send`，不得先执行 `onboarding inspect`、`activation verify`、状态检查或目录搜索；`send` 自身会校验激活状态、托管规则、去重和投递结果。只有 `send` 返回明确的配置或激活错误时，才进入对应诊断或 Onboarding 流程。
+
+`item-id` 与 `state` 是稳定的内部机器标识；`action` 会原样成为 Bark 正文，必须使用与用户相同语言、简短且面向用户的自然语言，例如“请提供准确的四位确认码”。不得使用 slug、snake_case、内部状态名、命令、路径或日志作为 `action`。含空格的正文应作为一个完整命令参数传入。
 
 `blocking` 固定使用 P1（`timeSensitive` + `telegraph`）；`severe-risk` 固定使用 P0（`critical` + `alarm` + `volume=8`）。普通问答、例行进度、正常完成、可自动恢复的问题以及仅因 Agent 即将结束回复都不得发送；任何子 Agent、委派 Agent、Ticket Worker 都只能向主 Agent 报告，不能直接发送，已知 worker 标识会稳定得到 `suppressed`。
 

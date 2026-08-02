@@ -25,3 +25,5 @@
 真实 Bark P1 服务接受、手机可见性、实际全局 AGENTS 授权写入及新顶层任务行为仍属于人工验收；本次实现过程未发送真实 Bark、未修改用户全局 AGENTS、未运行 Hook。
 
 真机验收后续修复：`ef371c6` 补齐 Personal marketplace 安装元数据并将 Blocking 托管规则升级为可安全迁移的 v2；`2874d28` 明确运行时窄权限与结果合同，为 `state_write_error` 返回机器可读的单次授权重试动作，并禁止 Agent 在 `ok=false`、非零退出或非 `accepted` 状态下声称通知已发送。全量测试增至 48/48。
+
+2026-08-03 首次真实 Blocking/P1 验收已确认 Bark 服务接受且手机可见。执行记录同时暴露两个体验问题：任务使用已失效的安装版本路径，随后扫描目录并额外运行 `onboarding inspect`；`action` 使用机器 slug，导致 Bark 正文显示 `provide-the-exact-four-digit-confirmation-code`。修复版要求直接使用宿主技能清单中的精确 Skill 路径，已激活的正常触发只运行一次 `send`，并在网络调用前拒绝机器 slug，要求使用用户语言的自然正文。全量测试增至 50/50，Skill 与插件校验通过，已重新安装 `0.1.0+codex.20260802191917`。MVP 冻结前仅剩一个新顶层任务的新版正文与调用时延复验。
