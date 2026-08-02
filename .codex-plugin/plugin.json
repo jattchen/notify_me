@@ -1,6 +1,28 @@
 {
   "name": "notify-me",
-  "version": "0.1.0",
-  "description": "只在主 Agent 判断任务阻塞或严重风险时发送固定 P1/P0 的最小化 Bark 通知。",
-  "skills": ["skills/notify-me"]
+  "version": "0.1.0+codex.20260802185210",
+  "description": "\u53ea\u5728\u4e3b Agent \u5224\u65ad\u4efb\u52a1\u963b\u585e\u6216\u4e25\u91cd\u98ce\u9669\u65f6\u53d1\u9001\u56fa\u5b9a P1/P0 \u7684\u6700\u5c0f\u5316 Bark \u901a\u77e5\u3002",
+  "author": {
+    "name": "Notify Me Contributors"
+  },
+  "keywords": [
+    "bark",
+    "notification",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Notify Me",
+    "shortDescription": "\u963b\u585e\u4e0e\u4e25\u91cd\u98ce\u9669\u7684\u6700\u5c0f\u5316 Bark \u901a\u77e5",
+    "longDescription": "\u53ea\u5728\u9876\u5c42\u4e3b Agent \u5224\u65ad\u4efb\u52a1\u963b\u585e\u6216\u51fa\u73b0\u9700\u8981\u7acb\u5373\u4ecb\u5165\u7684\u4e25\u91cd\u98ce\u9669\u65f6\uff0c\u6309\u9700\u53d1\u9001 Bark \u624b\u673a\u901a\u77e5\u3002",
+    "developerName": "Notify Me Contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Notifications"
+    ],
+    "defaultPrompt": [
+      "\u68c0\u67e5 Notify Me \u7684\u672c\u5730\u914d\u7f6e\u4e0e\u6fc0\u6d3b\u72b6\u6001\u3002",
+      "\u53d1\u9001\u4e00\u6761 Notify Me P1 \u6d4b\u8bd5\u901a\u77e5\u3002"
+    ]
+  }
 }

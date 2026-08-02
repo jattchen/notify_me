@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import notify_me.activation as activation
 from notify_me.cli import run_cli
-from notify_me.constants import MANAGED_BLOCK
+from notify_me.constants import LEGACY_MANAGED_BLOCK_V1, MANAGED_BLOCK
 from notify_me.storage import StateStore, resolve_storage_paths
 from notify_me.transport import FakeBarkTransport
 
@@ -57,6 +57,31 @@ class AgentsRuleActivationTests(unittest.TestCase):
             self.assertTrue(committed["changed"])
             self.assertEqual(override.read_text(encoding="utf-8"), "override instructions\n" + MANAGED_BLOCK + "\n")
             self.assertEqual(default.read_text(encoding="utf-8"), "default instructions\n")
+
+    def test_exact_v1_managed_block_can_be_safely_upgraded_to_v2(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            self.prepare_activation(env)
+            codex_home = Path(env["CODEX_HOME"])
+            codex_home.mkdir()
+            agents = codex_home / "AGENTS.md"
+            agents.write_text("user content\n" + LEGACY_MANAGED_BLOCK_V1 + "\n", encoding="utf-8")
+
+            plan = run_cli(["agents-rule", "plan"], env=env)
+            committed = run_cli(
+                [
+                    "agents-rule",
+                    "commit",
+                    "--authorize",
+                    "--expected-sha256",
+                    plan["current_sha256"],
+                ],
+                env=env,
+            )
+
+            self.assertEqual(plan["change"], "upgrade")
+            self.assertTrue(committed["changed"])
+            self.assertEqual(agents.read_text(encoding="utf-8"), "user content\n" + MANAGED_BLOCK + "\n")
 
     def test_rule_install_reports_restart_until_a_new_task_verifies_it(self):
         with tempfile.TemporaryDirectory() as temp_dir:

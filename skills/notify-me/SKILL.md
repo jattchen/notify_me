@@ -23,7 +23,7 @@ python3 <notify-me-skill>/scripts/notify_me.py agents-rule commit --authorize
 
 `setup` 的提示是终端私密输入；Bark 完整推送 URL 不得进入对话、命令参数、日志或状态库。`test` 只代表 Bark 服务已接受，只有用户确认手机实际出现测试通知后，才调用 `onboarding confirm`。
 
-只有当前顶层、直接面向用户的主 Agent 在明确判断任务确实阻塞或出现需要立即介入的严重风险时，才按条件调用：
+只有当前顶层、直接面向用户的主 Agent 在明确判断任务确实阻塞或出现需要立即介入的严重风险时，才按条件调用。必须向用户索取缺失信息、亲自授权、实质选择或外部操作，并且用户响应前没有可继续的主线工作，属于 Blocking；必须在向用户提出请求的同一轮先发送通知，不得把它当作普通澄清而跳过：
 
 ```text
 python3 <notify-me-skill>/scripts/notify_me.py send --condition-id blocking --item-id <item> --state <state> --action <action>

@@ -16,11 +16,17 @@ class MvpPackageContractTests(unittest.TestCase):
         manifest = json.loads((root / ".codex-plugin" / "plugin.json").read_text())
 
         self.assertEqual(manifest["name"], "notify-me")
-        self.assertEqual(manifest["version"], "0.1.0")
-        self.assertEqual(manifest["skills"], ["skills/notify-me"])
+        self.assertRegex(manifest["version"], r"^0\.1\.0(?:\+codex\.[0-9A-Za-z.-]+)?$")
+        self.assertEqual(manifest["skills"], "./skills/")
+        self.assertEqual(manifest["author"]["name"], "Notify Me Contributors")
+        self.assertEqual(manifest["interface"]["displayName"], "Notify Me")
         self.assertNotIn("hooks", manifest)
         self.assertTrue((root / "skills" / "notify-me" / "SKILL.md").is_file())
         self.assertFalse((root / "hooks").exists())
+
+        agent_metadata = (root / "skills" / "notify-me" / "agents" / "openai.yaml").read_text()
+        self.assertIn("interface:", agent_metadata)
+        self.assertIn("allow_implicit_invocation: true", agent_metadata)
 
     def test_non_blocking_condition_has_no_mvp_send_entry(self):
         with tempfile.TemporaryDirectory() as temp_dir:

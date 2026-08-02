@@ -8,10 +8,17 @@ NOTIFICATION_LEASE_SECONDS = 300
 PLUGIN_VERSION = "0.1.0"
 ICON_URL = "https://hcn58q8zsfep.feishuapp.com/app/app_17acsapfz2z/codex-bark-icon.png"
 
-MANAGED_BLOCK = "\n".join(
+LEGACY_MANAGED_BLOCK_V1 = "\n".join(
     (
         "<!-- notify-me:managed:start version=1 -->",
         "仅顶层、直接面向用户的主 Agent 持续判断是否命中已启用的 Notify Me 内置条件：任务阻塞或需要立即介入的严重风险。只有判断命中时才按需读取并调用 Notify Me；普通问答、进度、完成、已获授权的常规敏感操作及任何子 Agent、委派 Agent、Ticket Worker 均不得调用。",
+        "<!-- notify-me:managed:end -->",
+    )
+)
+MANAGED_BLOCK = "\n".join(
+    (
+        "<!-- notify-me:managed:start version=2 -->",
+        "仅顶层、直接面向用户的主 Agent 持续判断 Notify Me 内置条件。任务阻塞包括：必须向用户索取缺失信息、亲自授权、实质选择或外部操作，且用户响应前没有可继续的主线工作；严重风险指继续执行可能造成灾难性或大范围不可逆影响。命中任一条件时，必须在向用户提出请求或继续操作之前按需读取并调用 Notify Me，不得把阻塞当作普通澄清而跳过。普通问答、进度、完成、已获授权的常规敏感操作及任何子 Agent、委派 Agent、Ticket Worker 均不得调用。",
         "<!-- notify-me:managed:end -->",
     )
 )

@@ -14,13 +14,16 @@ try:
 except ImportError:  # pragma: no cover - the supported MVP hosts provide fcntl.
     fcntl = None
 
-from .constants import MANAGED_BLOCK, MANAGED_BLOCK_HASH
+from .constants import LEGACY_MANAGED_BLOCK_V1, MANAGED_BLOCK, MANAGED_BLOCK_HASH
 from .errors import NotifyMeError
 
 
 _START_PREFIX = "<!-- notify-me:managed:start"
 _END_MARKER = "<!-- notify-me:managed:end -->"
-_VERSIONED_START = "<!-- notify-me:managed:start version=1 -->"
+_VERSIONED_STARTS = {
+    "<!-- notify-me:managed:start version=1 -->",
+    "<!-- notify-me:managed:start version=2 -->",
+}
 
 
 @dataclass(frozen=True)
@@ -124,9 +127,15 @@ def _managed_block_info(data):
     elif text[end:line_end].strip():
         raise NotifyMeError("managed_block_conflict", "Notify Me 托管块结束标记必须独占一行")
     block = text[start:end]
-    if not block.startswith(_VERSIONED_START):
+    if not any(block.startswith(marker) for marker in _VERSIONED_STARTS):
         raise NotifyMeError("managed_block_version", "Notify Me 托管块版本不受支持")
-    status = "installed" if block.replace("\r\n", "\n") == MANAGED_BLOCK else "drifted"
+    normalized = block.replace("\r\n", "\n")
+    if normalized == MANAGED_BLOCK:
+        status = "installed"
+    elif normalized == LEGACY_MANAGED_BLOCK_V1:
+        status = "upgradeable"
+    else:
+        status = "drifted"
     return {"status": status, "text": text, "start": start, "end": end, "block": block}
 
 
@@ -143,7 +152,7 @@ def _candidate_content(info):
         return text + separator + block + newline
     if info["status"] == "installed":
         return text
-    if info["status"] == "drifted":
+    if info["status"] in ("drifted", "upgradeable"):
         return text[: info["start"]] + block + text[info["end"] :]
     raise NotifyMeError("managed_block_conflict", "Notify Me 托管块状态无效")
 
@@ -164,7 +173,7 @@ def plan_agents_rule(env=None):
         result_bytes = target.data
     else:
         candidate = _candidate_content(info).encode("utf-8")
-        change = {"missing": "append", "installed": "none"}[info["status"]]
+        change = {"missing": "append", "installed": "none", "upgradeable": "upgrade"}[info["status"]]
         result_bytes = candidate
     return {
         "path": str(target.path),
