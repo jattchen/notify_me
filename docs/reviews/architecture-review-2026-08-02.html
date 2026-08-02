@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Notify Me · Architecture Review</title>
+    <style>
+      :root { color-scheme: light; --ink:#172033; --muted:#637083; --line:#d9e0e8; --paper:#f7f6f2; --card:#fff; --accent:#087f5b; --deep:#10243d; --warn:#a86408; }
+      * { box-sizing: border-box; }
+      body { margin:0; background:var(--paper); color:var(--ink); font:15px/1.6 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+      main { width:min(1080px,calc(100% - 32px)); margin:0 auto; padding:56px 0 72px; }
+      header { display:flex; justify-content:space-between; gap:24px; align-items:end; margin-bottom:36px; }
+      h1,h2,h3,p { margin-top:0; } h1 { font-size:38px; line-height:1.15; margin-bottom:8px; } h2 { font-size:23px; } h3 { font-size:16px; }
+      .eyebrow { color:var(--accent); font-size:12px; font-weight:700; letter-spacing:.16em; text-transform:uppercase; }
+      .meta,.muted { color:var(--muted); }
+      .banner { background:var(--deep); color:white; border-radius:18px; padding:28px; margin-bottom:24px; }
+      .banner p { color:#dbe8f5; margin-bottom:0; }
+      .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
+      .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:22px; }
+      .tag { display:inline-block; border-radius:999px; padding:3px 10px; margin-left:8px; background:#dff5eb; color:#086b4d; font-size:12px; font-weight:700; vertical-align:middle; }
+      .tag.warn { background:#fff0d5; color:var(--warn); }
+      .flow { display:grid; grid-template-columns:1fr auto 1fr auto 1fr; align-items:center; gap:10px; margin:18px 0; }
+      .node { min-height:84px; border:1px solid var(--line); border-radius:12px; background:#fbfcfd; padding:14px; text-align:center; display:flex; align-items:center; justify-content:center; }
+      .arrow { color:var(--muted); font-size:22px; }
+      ul,ol { padding-left:22px; margin-bottom:0; }
+      code { background:#eef1f5; border-radius:5px; padding:2px 5px; }
+      table { width:100%; border-collapse:collapse; margin-top:12px; }
+      th,td { text-align:left; vertical-align:top; padding:10px 8px; border-bottom:1px solid var(--line); }
+      th { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+      section { margin-top:24px; }
+      @media (max-width:760px) { header { display:block; } .grid { grid-template-columns:1fr; } .flow { grid-template-columns:1fr; } .arrow { transform:rotate(90deg); text-align:center; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <div class="eyebrow">Architecture review</div>
+          <h1>Notify Me · 深模块候选</h1>
+          <p class="muted">从 Bark Push 拆出纯通知能力，并保持可演进的最小边界。</p>
+        </div>
+        <div class="meta">2026-08-02<br />对应 Spec Draft 0.3</div>
+      </header>
+
+      <div class="banner">
+        <div class="eyebrow">Top recommendation</div>
+        <h2>把通知编排收进一个深 Runtime</h2>
+        <p>调用者只表达条件已经满足；Runtime 内部吸收效果解析、事件身份、SQLite 账本、去重升级、租约、Outbox 与 Bark payload 顺序。</p>
+      </div>
+
+      <section class="grid">
+        <article class="card">
+          <h2>Notification Runtime <span class="tag">Strong</span></h2>
+          <p>避免把每张表、每次 claim 和每个发送步骤暴露成浅接口。Skill、CLI 与 Hook 恢复入口都调用同一 Runtime。</p>
+          <div class="flow">
+            <div class="node">Notify / Resolve</div><div class="arrow">→</div>
+            <div class="node">identity + policy + ledger + outbox</div><div class="arrow">→</div>
+            <div class="node">Bark transport</div>
+          </div>
+          <ul>
+            <li>故障和事务顺序保持 locality；</li>
+            <li>去重、升级与订阅消费不能被调用者拆开；</li>
+            <li>SQLite 留在模块内部，不公开 repository/table 接口。</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <h2>Activation <span class="tag">Strong</span></h2>
+          <p>把 Onboarding、私密 Bark 绑定、生效 AGENTS 文件解析、双 Hook 信任与新任务验证收进一个可恢复状态机。</p>
+          <ul>
+            <li><code>inspect</code> 只读，<code>initialize</code> 单独建库；</li>
+            <li>规则只在一次明确授权后写入实际生效文件；</li>
+            <li><code>UserPromptSubmit</code> 与 <code>SessionStart(^compact$)</code> 共享恢复入口；</li>
+            <li>新顶层任务验证完成前不宣称 active。</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <h2>Bark Transport <span class="tag warn">Worth exploring</span></h2>
+          <p>Bark HTTP 是真实外部边界，值得保留一个窄 adapter seam；确定性测试 adapter 用于失败分类、重定向、超时和 payload 合同测试。</p>
+          <ul>
+            <li>Runtime 不依赖 HTTP 库细节；</li>
+            <li>测试无需 patch 网络库内部实现；</li>
+            <li>只报告“服务已接受”，不冒充手机已展示。</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <h2>Effect Policy <span class="tag warn">Keep internal</span></h2>
+          <p>效果配置目前只有 Runtime 一个真实调用者。校验、解析、指纹和打扰强度比较应先作为内部实现，避免为了字段映射制造浅模块。</p>
+          <ul>
+            <li>效果指纹与打扰强度分开；</li>
+            <li>只有严格更强或语义状态变化才自动升级；</li>
+            <li>出现第二个独立调用者时再重新评估抽取。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="card">
+        <h2>Draft 0.3 复核后补强</h2>
+        <table>
+          <thead><tr><th>问题</th><th>冻结合同</th></tr></thead>
+          <tbody>
+            <tr><td>同一长回合发生 compaction</td><td>双 Hook 共用 scope、<code>context_revision</code>、幂等查询与单项原子 claim。</td></tr>
+            <tr><td>全局规则可能写到非生效文件</td><td>解析实际 <code>CODEX_HOME</code>，尊重 <code>AGENTS.override.md</code>，在新任务中验活。</td></tr>
+            <tr><td>一次性订阅过早消费</td><td>queued 不消费；仅 Bark 接受或同 fulfillment event 的 delivered dedup 消费。</td></tr>
+            <tr><td>事件身份和复发碰撞</td><td>scope、condition、incident、generation、event 共同构成不可逆通知身份。</td></tr>
+            <tr><td>SQLite 只写了表名</td><td>冻结主外键、唯一/CHECK、原子 claim、迁移 checksum、WAL 与备份明文清理。</td></tr>
+            <tr><td>图标 URL 可被覆盖</td><td>MVP 可用已验证开发地址；正式发布必须使用带 SHA 或版本号的不可变 URL。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="card">
+        <h2>MVP-first：Ticket 1 只验证最小纵向闭环</h2>
+        <p>第一张实现 Ticket 不追求完整产品配置，而是优先消除宿主合同与真实投递的不确定性。</p>
+        <div class="flow">
+          <div class="node">私密绑定 + 最小 SQLite</div><div class="arrow">→</div>
+          <div class="node">AGENTS 规则 + 阻塞触发</div><div class="arrow">→</div>
+          <div class="node">固定 P1 真机可见</div>
+        </div>
+        <p class="muted">Ticket 1 只提供固定的 Blocking/P1 与 Severe Risk/P0，不做用户订阅，也不安装或验证任何 Hook。订阅状态机、双 Hook、scope 合同、P0–P3 编辑器、完整 generation/outbox、迁移备份和发布加固均在 MVP 通过后分层追加。</p>
+      </section>
+    </main>
+  </body>
+</html>
