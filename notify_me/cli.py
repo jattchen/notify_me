@@ -221,6 +221,8 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
             "state",
             "action",
             "private",
+            "task-title",
+            "project-name",
             "actor-role",
             "worker-id",
         }
@@ -257,6 +259,8 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
                 worker_id=options.get("worker-id"),
                 env=env,
                 sleep=sleep,
+                task_title=options.get("task-title"),
+                project_name=options.get("project-name"),
             ),
         }
 

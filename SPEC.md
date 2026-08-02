@@ -269,16 +269,16 @@ Notify Me 默认使用已有 512×512 Codex 插图，不提供用户自定义图
 
 - 正文只写用户现在要做的具体动作或订阅结果，例如“请批准文件访问”或“测试已全部通过”。
 - 禁止发送背景日志、命令、工具参数、路径、Bark 地址、设备密钥、Token、个人数据或其他敏感内容。
-- 标题使用通知类型和安全任务标签，不依赖 Codex 侧边栏标题。
-- 项目名默认不推断、不发送；只有用户明确允许且名称不敏感时才加入标题。
-- `private` 模式忽略任务标签和项目名，使用通用标题。
+- 正常模式标题使用通知类型和宿主当前任务的真实可见标题；不得由 Agent 自行概括或改写。宿主无法可靠提供时只显示通知类型。
+- 当前任务明确归属于项目时，正文末尾追加 `（所属项目：<项目根文件夹名>）`；无项目会话省略，不得仅凭临时 cwd 猜测项目。
+- `private` 模式忽略任务标题、项目名和具体行动，标题只保留通知类型，正文固定为“请查看 Codex 中待处理事项”。
 
 默认标题建议：
 
-- 阻塞：`🖐 需要操作｜<安全任务标签>`；
-- 严重风险：`🚨 严重风险｜<安全任务标签>`；
-- 订阅：`🔔 条件已满足｜<安全任务标签>`；
-- private：`Notify Me｜请查看 Codex`。
+- 阻塞：`🖐 需要操作｜<真实任务标题>`；
+- 严重风险：`🚨 严重风险｜<真实任务标题>`；
+- 订阅：`🔔 条件已满足｜<真实任务标题>`；
+- private：标题为对应通知类型，正文为“请查看 Codex 中待处理事项”。
 
 ### 6.2 Bark 地址
 
@@ -515,7 +515,7 @@ notify_me.py subscribe trigger --subscription-id ... --event-id ... --state ... 
 
 notify_me.py send --condition-id blocking|severe-risk|... \
   --event-id ... [--incident-id ...] --state ... --action ... \
-  [--title ...] [--private]
+  [--task-title ...] [--project-name ...] [--private]
 
 notify_me.py resolve --incident-id ...
 notify_me.py drain [--force]

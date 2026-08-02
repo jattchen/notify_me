@@ -39,13 +39,17 @@ Onboarding 第一次申请这类权限时，应请求一条可复用授权，命
 只有当前顶层、直接面向用户的主 Agent 在明确判断任务确实阻塞或出现需要立即介入的严重风险时，才按条件调用。必须向用户索取缺失信息、亲自授权、实质选择或外部操作，并且用户响应前没有可继续的主线工作，属于 Blocking；必须在向用户提出请求的同一轮先发送通知，不得把它当作普通澄清而跳过：
 
 ```text
-python3 <notify-me-skill>/scripts/notify_me.py send --condition-id blocking --item-id <item> --state <state> --action <action>
-python3 <notify-me-skill>/scripts/notify_me.py send --condition-id severe-risk --item-id <item> --state <state> --action <action>
+python3 <notify-me-skill>/scripts/notify_me.py send --condition-id blocking --item-id <item> --state <state> --action <action> --task-title <exact-task-title> [--project-name <project-folder-name>]
+python3 <notify-me-skill>/scripts/notify_me.py send --condition-id severe-risk --item-id <item> --state <state> --action <action> --task-title <exact-task-title> [--project-name <project-folder-name>]
 ```
 
 正常触发快路径：Skill 已加载且用户已完成 Onboarding 时，直接只执行一次 `send`，不得先执行 `onboarding inspect`、`activation verify`、状态检查或目录搜索；`send` 自身会校验激活状态、托管规则、去重和投递结果。只有 `send` 返回明确的配置或激活错误时，才进入对应诊断或 Onboarding 流程。
 
 `item-id` 与 `state` 是稳定的内部机器标识；`action` 会原样成为 Bark 正文，必须使用与用户相同语言、简短且面向用户的自然语言，例如“请提供准确的四位确认码”。不得使用 slug、snake_case、内部状态名、命令、路径或日志作为 `action`。含空格的正文应作为一个完整命令参数传入。
+
+正常模式必须从宿主当前任务元数据读取真实可见标题并作为 `--task-title <exact-task-title>` 传入，不得自行概括或改写；宿主无法可靠提供时省略该参数，运行时只显示条件名称。当前任务明确归属于项目时，把项目根文件夹名称作为 `--project-name <project-folder-name>` 传入，运行时会在正文末尾追加中文括号；无项目会话必须省略该参数，不得仅凭临时 cwd 猜测项目。
+
+隐私模式只使用 `--private` 发送，不得传入会话标题、项目名或具体行动；标题只保留条件名称，正文固定为“请查看 Codex 中待处理事项”。隐私模式隐藏的是 Bark 请求内容，不代表通知本身不可见或提供端到端加密。
 
 `blocking` 固定使用 P1（`timeSensitive` + `telegraph`）；`severe-risk` 固定使用 P0（`critical` + `alarm` + `volume=8`）。普通问答、例行进度、正常完成、可自动恢复的问题以及仅因 Agent 即将结束回复都不得发送；任何子 Agent、委派 Agent、Ticket Worker 都只能向主 Agent 报告，不能直接发送，已知 worker 标识会稳定得到 `suppressed`。
 

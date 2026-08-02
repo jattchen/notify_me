@@ -111,6 +111,18 @@ class MvpPackageContractTests(unittest.TestCase):
         self.assertIn("面向用户的自然语言", skill)
         self.assertIn("不得使用 slug", skill)
 
+    def test_skill_passes_exact_task_context_and_defines_private_redaction(self):
+        root = Path(__file__).resolve().parents[1]
+        skill = (root / "skills" / "notify-me" / "SKILL.md").read_text()
+
+        self.assertIn("--task-title <exact-task-title>", skill)
+        self.assertIn("--project-name <project-folder-name>", skill)
+        self.assertIn("不得自行概括或改写", skill)
+        self.assertIn("无项目会话必须省略", skill)
+        self.assertIn("隐私模式", skill)
+        self.assertIn("不得传入会话标题、项目名或具体行动", skill)
+        self.assertIn("标题只保留条件名称", skill)
+
     def test_installed_skill_wrapper_runs_from_a_non_repository_cwd(self):
         root = Path(__file__).resolve().parents[1]
         wrapper = root / "skills" / "notify-me" / "scripts" / "notify_me.py"

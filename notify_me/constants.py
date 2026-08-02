@@ -39,8 +39,8 @@ CONDITION_PRIORITY = {
 }
 
 CONDITION_TITLES = {
-    "blocking": "🖐 需要操作｜Notify Me",
-    "severe-risk": "🚨 严重风险｜Notify Me",
+    "blocking": "🖐 需要操作",
+    "severe-risk": "🚨 严重风险",
 }
 
 CONDITION_EFFECTS = {

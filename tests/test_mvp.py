@@ -328,6 +328,7 @@ class MvpActivationTests(unittest.TestCase):
             self.assertEqual(before_test["error"]["code"], "test_not_accepted")
             self.assertEqual(accepted["status"], "accepted")
             self.assertEqual(accepted["phone_status"], "unverified")
+            self.assertEqual(fake.payloads[-1]["title"], "🔔 连接测试")
             self.assertEqual(confirmed["status"], "test-confirmed")
 
     def test_blocking_uses_the_fixed_minimal_p1_payload(self):
@@ -353,6 +354,10 @@ class MvpActivationTests(unittest.TestCase):
                     "waiting-for-approval",
                     "--action",
                     "请批准文件访问",
+                    "--task-title",
+                    "梳理 Bark 消息推送规则",
+                    "--project-name",
+                    "notify_me",
                 ],
                 env=env,
                 transport=fake,
@@ -363,8 +368,8 @@ class MvpActivationTests(unittest.TestCase):
                 p1,
                 {
                     "device_key": "Abcdef12_key",
-                    "title": "🖐 需要操作｜Notify Me",
-                    "body": "请批准文件访问",
+                    "title": "🖐 需要操作｜梳理 Bark 消息推送规则",
+                    "body": "请批准文件访问（所属项目：notify_me）",
                     "group": "codex",
                     "icon": "https://hcn58q8zsfep.feishuapp.com/app/app_17acsapfz2z/codex-bark-icon.png",
                     "id": blocking["notification_id"],
@@ -409,6 +414,84 @@ class MvpActivationTests(unittest.TestCase):
             self.assertEqual(result["error"]["code"], "invalid_action")
             self.assertEqual(len(fake.payloads), payload_count)
 
+    def test_private_mode_hides_task_project_and_action_details(self):
+        fake = FakeBarkTransport()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "fixture-scope-01",
+                "CODEX_THREAD_ID": None,
+            }
+            self.prepare_active(env, fake)
+
+            result = run_cli(
+                [
+                    "send",
+                    "--condition-id",
+                    "blocking",
+                    "--item-id",
+                    "private-event",
+                    "--state",
+                    "waiting-private",
+                    "--action",
+                    "请批准机密项目付款",
+                    "--task-title",
+                    "机密收购项目",
+                    "--project-name",
+                    "secret_project",
+                    "--private",
+                ],
+                env=env,
+                transport=fake,
+            )
+
+            self.assertEqual(result["status"], "accepted")
+            payload = fake.payloads[-1]
+            self.assertEqual(payload["title"], "🖐 需要操作")
+            self.assertEqual(payload["body"], "请查看 Codex 中待处理事项")
+            serialized = json.dumps(payload, ensure_ascii=False)
+            self.assertNotIn("机密收购项目", serialized)
+            self.assertNotIn("secret_project", serialized)
+            self.assertNotIn("请批准机密项目付款", serialized)
+
+    def test_unavailable_or_unsafe_context_labels_fall_back_without_blocking_send(self):
+        fake = FakeBarkTransport()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "fixture-scope-01",
+                "CODEX_THREAD_ID": None,
+            }
+            self.prepare_active(env, fake)
+
+            result = run_cli(
+                [
+                    "send",
+                    "--condition-id",
+                    "blocking",
+                    "--item-id",
+                    "fallback-event",
+                    "--state",
+                    "waiting-fallback",
+                    "--action",
+                    "请提供确认码",
+                    "--task-title",
+                    "不安全\n标题",
+                    "--project-name",
+                    "不安全\n项目",
+                ],
+                env=env,
+                transport=fake,
+            )
+
+            self.assertEqual(result["status"], "accepted")
+            self.assertEqual(fake.payloads[-1]["title"], "🖐 需要操作")
+            self.assertEqual(fake.payloads[-1]["body"], "请提供确认码")
+
     def test_severe_risk_uses_the_fixed_minimal_p0_payload(self):
         fake = FakeBarkTransport()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -432,6 +515,10 @@ class MvpActivationTests(unittest.TestCase):
                     "rollback-guarantee-lost",
                     "--action",
                     "请立即确认是否停止操作",
+                    "--task-title",
+                    "生产恢复保障检查",
+                    "--project-name",
+                    "notify_me",
                 ],
                 env=env,
                 transport=fake,
@@ -445,8 +532,8 @@ class MvpActivationTests(unittest.TestCase):
                 p0,
                 {
                     "device_key": "Abcdef12_key",
-                    "title": "🚨 严重风险｜Notify Me",
-                    "body": "请立即确认是否停止操作",
+                    "title": "🚨 严重风险｜生产恢复保障检查",
+                    "body": "请立即确认是否停止操作（所属项目：notify_me）",
                     "group": "codex",
                     "icon": "https://hcn58q8zsfep.feishuapp.com/app/app_17acsapfz2z/codex-bark-icon.png",
                     "id": severe["notification_id"],

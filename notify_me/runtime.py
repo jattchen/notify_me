@@ -19,6 +19,7 @@ from .transport import BarkEndpoint
 
 
 _SAFE_ACTION = re.compile(r"[^\r\n]{1,160}$")
+_SAFE_CONTEXT_LABEL = re.compile(r"[^\r\n]{1,80}$")
 _MACHINE_ACTION = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+){2,}$")
 _WORKER_ROLES = {
     "subagent",
@@ -99,7 +100,21 @@ def actor_is_suppressed(actor_role=None, worker_id=None, env=None):
     return role in _WORKER_ROLES or bool(known_worker)
 
 
-def _body(action, private):
+def _context_label(value):
+    if isinstance(value, str) and _SAFE_CONTEXT_LABEL.fullmatch(value):
+        return value
+    return None
+
+
+def _title(condition_id, task_title, private):
+    base = CONDITION_TITLES[condition_id]
+    if private:
+        return base
+    label = _context_label(task_title)
+    return base + "｜" + label if label else base
+
+
+def _body(action, private, project_name=None):
     if private:
         return "请查看 Codex 中待处理事项"
     if not isinstance(action, str) or not _SAFE_ACTION.fullmatch(action):
@@ -109,7 +124,8 @@ def _body(action, private):
             "invalid_action",
             "通知动作必须是面向用户的自然语言，不能使用内部 slug 或标识符",
         )
-    return action
+    project = _context_label(project_name)
+    return action + "（所属项目：" + project + "）" if project else action
 
 
 def _build_payload(endpoint, title, body, notification_id, effect):
@@ -125,13 +141,21 @@ def _build_payload(endpoint, title, body, notification_id, effect):
     return payload
 
 
-def build_payload(endpoint, condition_id, notification_id, action, private=False):
+def build_payload(
+    endpoint,
+    condition_id,
+    notification_id,
+    action,
+    private=False,
+    task_title=None,
+    project_name=None,
+):
     if condition_id not in CONDITION_PRIORITY:
         raise NotifyMeError("invalid_condition", "MVP 只支持固定内置通知条件")
     return _build_payload(
         endpoint,
-        "Notify Me｜请查看 Codex" if private else CONDITION_TITLES[condition_id],
-        _body(action, private),
+        _title(condition_id, task_title, private),
+        _body(action, private, project_name),
         notification_id,
         CONDITION_EFFECTS[condition_id],
     )
@@ -140,7 +164,7 @@ def build_payload(endpoint, condition_id, notification_id, action, private=False
 def build_test_payload(endpoint):
     return _build_payload(
         endpoint,
-        "Notify Me｜连接测试",
+        "🔔 连接测试",
         "Notify Me 测试通知：请确认手机是否收到。",
         "notify-me-test-p1",
         CONDITION_EFFECTS["blocking"],
@@ -229,7 +253,7 @@ def send_test(store, endpoint, transport, sleep=None):
     }
 
 
-def send_condition(store, endpoint, transport, condition_id, item_id, state, action, private=False, actor_role=None, worker_id=None, env=None, sleep=None):
+def send_condition(store, endpoint, transport, condition_id, item_id, state, action, private=False, actor_role=None, worker_id=None, env=None, sleep=None, task_title=None, project_name=None):
     """Send one event formed by a notification item and its semantic state."""
     values = os.environ if env is None else env
     if actor_is_suppressed(actor_role, worker_id, values):
@@ -255,7 +279,15 @@ def send_condition(store, endpoint, transport, condition_id, item_id, state, act
         (condition_id + "\0" + item_id + "\0" + state).encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()[:40]
-    payload = build_payload(endpoint, condition_id, notification_id, action, private)
+    payload = build_payload(
+        endpoint,
+        condition_id,
+        notification_id,
+        action,
+        private,
+        task_title,
+        project_name,
+    )
     row = {
         "notification_id": notification_id,
         "scope_key": scope_key,
