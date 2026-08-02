@@ -23,3 +23,5 @@
 协调器在集成后的 `main` 上分别复跑默认与显式测试发现，两者均为 45/45 通过；Python 编译、插件 manifest、`git diff --check`，以及 Hook、订阅和 High Risk 禁入扫描均通过。最终实现使用安装态 Skill-local 入口，以可信宿主任务作用域证明新任务验活，使用 `item_id + state` 表达通知事项事件，并将 Bark 接受结果明确记录为 `accepted`、手机状态保持 `unverified`。
 
 真实 Bark P1 服务接受、手机可见性、实际全局 AGENTS 授权写入及新顶层任务行为仍属于人工验收；本次实现过程未发送真实 Bark、未修改用户全局 AGENTS、未运行 Hook。
+
+真机验收后续修复：`ef371c6` 补齐 Personal marketplace 安装元数据并将 Blocking 托管规则升级为可安全迁移的 v2；`2874d28` 明确运行时窄权限与结果合同，为 `state_write_error` 返回机器可读的单次授权重试动作，并禁止 Agent 在 `ok=false`、非零退出或非 `accepted` 状态下声称通知已发送。全量测试增至 48/48。
