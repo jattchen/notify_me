@@ -1,6 +1,7 @@
 """Bark URL handling and the only network boundary in the MVP."""
 
 import copy
+import http.client
 import json
 import re
 import socket
@@ -186,7 +187,7 @@ class BarkTransport:
                 exc.close()
             retryable, category = _classify_http_status(status)
             return TransportResult(False, retryable, category, status)
-        except (urllib.error.URLError, socket.timeout, TimeoutError, OSError):
+        except (urllib.error.URLError, socket.timeout, TimeoutError, OSError, http.client.HTTPException):
             return TransportResult(False, True, "network_error")
         if status < 200 or status >= 300:
             retryable, category = _classify_http_status(status)

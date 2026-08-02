@@ -12,6 +12,7 @@ from pathlib import Path
 from .constants import (
     NOTIFICATIONS_INDEX_SQL,
     NOTIFICATIONS_TABLE_SQL,
+    NOTIFICATION_LEASE_SECONDS,
     SCHEMA_CHECKSUM,
     SCHEMA_SQL,
     SCHEMA_VERSION,
@@ -45,7 +46,8 @@ def _now():
 
 
 def _ensure_private_directory(path):
-    if path.exists() and path.is_symlink():
+    _reject_symlink_components(path, "unsafe_config_path", "私有配置路径不能包含符号链接")
+    if path.is_symlink():
         raise NotifyMeError("unsafe_config_path", "私有配置目录不能是符号链接")
     if path.exists() and not path.is_dir():
         raise NotifyMeError("unsafe_config_path", "私有配置目录不是目录")
@@ -57,10 +59,22 @@ def _ensure_private_directory(path):
 
 
 def _reject_unsafe_database(path):
-    if path.exists() and path.is_symlink():
+    _reject_symlink_components(path, "unsafe_state_path", "状态库路径不能包含符号链接")
+    if path.is_symlink():
         raise NotifyMeError("unsafe_state_path", "状态库不能是符号链接")
     if path.exists() and not path.is_file():
         raise NotifyMeError("unsafe_state_path", "状态库不是普通文件")
+
+
+def _reject_symlink_components(path, code, message):
+    existing_component_seen = False
+    for component in (path, *path.parents):
+        if component.is_symlink():
+            raise NotifyMeError(code, message)
+        if component.exists():
+            if existing_component_seen:
+                break
+            existing_component_seen = True
 
 
 def _connect(path):
@@ -80,15 +94,18 @@ def _create_current_schema(connection):
         connection.execute(statement)
 
 
-def _migrate_v1_to_v2(connection):
-    """Expand the fixed-condition check without losing MVP notification rows."""
+def _migrate_notifications_to_v3(connection):
+    """Rename the item identity and accepted status without losing notification rows."""
 
     connection.execute("DROP INDEX IF EXISTS notifications_event_identity")
+    connection.execute("DROP INDEX IF EXISTS notifications_item_identity")
     connection.execute("ALTER TABLE notifications RENAME TO notifications_v1")
     connection.execute(NOTIFICATIONS_TABLE_SQL)
     connection.execute(
-        "INSERT INTO notifications(notification_id, scope_key, condition_key, event_key, event_state_key, effect_fingerprint, status, created_at, updated_at, attempts, http_status, last_error) "
-        "SELECT notification_id, scope_key, condition_key, event_key, event_state_key, effect_fingerprint, status, created_at, updated_at, attempts, http_status, last_error FROM notifications_v1"
+        "INSERT INTO notifications(notification_id, scope_key, condition_key, item_key, event_state_key, effect_fingerprint, status, created_at, updated_at, attempts, http_status, last_error) "
+        "SELECT notification_id, scope_key, condition_key, event_key, event_state_key, effect_fingerprint, "
+        "CASE WHEN status = 'delivered' THEN 'accepted' ELSE status END, "
+        "created_at, updated_at, attempts, http_status, last_error FROM notifications_v1"
     )
     connection.execute(NOTIFICATIONS_INDEX_SQL)
     connection.execute("DROP TABLE notifications_v1")
@@ -115,8 +132,15 @@ class StateStore:
                 raise NotifyMeError("state_schema_too_new", "本地状态库由更新版本创建")
             if current == 0:
                 _create_current_schema(connection)
-            elif current == 1:
-                _migrate_v1_to_v2(connection)
+            elif current in (1, 2):
+                _migrate_notifications_to_v3(connection)
+            else:
+                checksum = connection.execute(
+                    "SELECT checksum FROM schema_migrations WHERE version = ?",
+                    (SCHEMA_VERSION,),
+                ).fetchone()
+                if checksum is None or checksum[0] != SCHEMA_CHECKSUM:
+                    raise NotifyMeError("state_schema_mismatch", "本地状态库结构版本不匹配")
             if current < SCHEMA_VERSION:
                 connection.execute(
                     "INSERT INTO schema_migrations(version, checksum, applied_at) VALUES (?, ?, ?)",
@@ -151,6 +175,8 @@ class StateStore:
 
     def require_initialized(self):
         self._require_database()
+        if self.database_summary()["status"] != "ready":
+            raise NotifyMeError("state_database_degraded", "本地状态库不可安全使用")
 
     def get_setting(self, key, default=None):
         self._require_database()
@@ -202,8 +228,47 @@ class StateStore:
             version = connection.execute(
                 "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
             ).fetchone()[0]
+            checksum = connection.execute(
+                "SELECT checksum FROM schema_migrations WHERE version = ?",
+                (SCHEMA_VERSION,),
+            ).fetchone()
+            required_names = {
+                "schema_migrations",
+                "settings",
+                "notifications",
+                "notifications_item_identity",
+            }
+            notification_columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(notifications)")
+            }
+            index_rows = list(connection.execute("PRAGMA index_list(notifications)"))
+            item_index = next(
+                (row for row in index_rows if row[1] == "notifications_item_identity"),
+                None,
+            )
+            item_index_columns = [
+                row[2]
+                for row in sorted(
+                    connection.execute("PRAGMA index_info(notifications_item_identity)"),
+                    key=lambda row: row[0],
+                )
+            ]
             integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
-            status = "ready" if version == SCHEMA_VERSION and integrity == "ok" else "degraded"
+            status = (
+                "ready"
+                if version == SCHEMA_VERSION
+                and checksum is not None
+                and checksum[0] == SCHEMA_CHECKSUM
+                and required_names <= names
+                and {"notification_id", "item_key", "event_state_key", "status"} <= notification_columns
+                and item_index is not None
+                and bool(item_index[2])
+                and item_index_columns
+                == ["scope_key", "condition_key", "item_key", "event_state_key", "effect_fingerprint"]
+                and integrity == "ok"
+                else "degraded"
+            )
             return {"status": status, "schema_version": version, "integrity": integrity}
         except sqlite3.Error as exc:
             raise NotifyMeError("state_read_error", "无法检查本地状态库") from exc
@@ -236,12 +301,12 @@ class StateStore:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 connection.execute(
-                    "INSERT INTO notifications(notification_id, scope_key, condition_key, event_key, event_state_key, effect_fingerprint, status, created_at, updated_at, attempts, http_status, last_error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO notifications(notification_id, scope_key, condition_key, item_key, event_state_key, effect_fingerprint, status, created_at, updated_at, attempts, http_status, last_error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         notification["notification_id"],
                         notification["scope_key"],
                         notification["condition_key"],
-                        notification["event_key"],
+                        notification["item_key"],
                         notification["event_state_key"],
                         notification["effect_fingerprint"],
                         notification["status"],
@@ -254,7 +319,23 @@ class StateStore:
                 )
                 inserted = True
             except sqlite3.IntegrityError:
-                inserted = False
+                existing = connection.execute(
+                    "SELECT status, updated_at FROM notifications WHERE notification_id = ?",
+                    (notification["notification_id"],),
+                ).fetchone()
+                stale_sending = (
+                    existing
+                    and existing[0] == "sending"
+                    and existing[1] < _now() - NOTIFICATION_LEASE_SECONDS
+                )
+                if existing and (existing[0] == "failed" or stale_sending):
+                    connection.execute(
+                        "UPDATE notifications SET status = 'sending', attempts = 0, http_status = NULL, last_error = NULL, updated_at = ? WHERE notification_id = ?",
+                        (_now(), notification["notification_id"]),
+                    )
+                    inserted = True
+                else:
+                    inserted = False
             connection.commit()
             return inserted
         except sqlite3.Error as exc:

@@ -1,4 +1,5 @@
 import io
+import http.client
 import json
 import socket
 import unittest
@@ -148,6 +149,17 @@ class BarkTransportContractTests(unittest.TestCase):
         self.assertTrue(timeout.retryable)
         self.assertEqual(empty.category, "invalid_response")
         self.assertTrue(empty.retryable)
+
+    def test_http_protocol_errors_keep_the_json_error_contract(self):
+        endpoint = self.endpoint()
+        result = BarkTransport(
+            timeout=1,
+            opener=_Opener(error=http.client.BadStatusLine("secret protocol detail")),
+        ).send(endpoint, {"device_key": endpoint.key, "title": "test"})
+
+        self.assertFalse(result.accepted)
+        self.assertTrue(result.retryable)
+        self.assertEqual(result.category, "network_error")
 
     def test_redirect_status_response_is_rejected_without_following_it(self):
         endpoint = self.endpoint()

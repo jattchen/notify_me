@@ -3,7 +3,8 @@
 import hashlib
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+NOTIFICATION_LEASE_SECONDS = 300
 PLUGIN_VERSION = "0.1.0"
 ICON_URL = "https://hcn58q8zsfep.feishuapp.com/app/app_17acsapfz2z/codex-bark-icon.png"
 
@@ -40,8 +41,8 @@ CONDITION_EFFECTS = {
     "severe-risk": P0_EFFECT,
 }
 
-NOTIFICATIONS_TABLE_SQL = "CREATE TABLE IF NOT EXISTS notifications (notification_id TEXT PRIMARY KEY, scope_key TEXT NOT NULL, condition_key TEXT NOT NULL CHECK (condition_key IN ('blocking', 'severe-risk')), event_key TEXT NOT NULL, event_state_key TEXT NOT NULL, effect_fingerprint TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('sending', 'delivered', 'failed', 'deduplicated')), created_at REAL NOT NULL, updated_at REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, http_status INTEGER, last_error TEXT)"
-NOTIFICATIONS_INDEX_SQL = "CREATE UNIQUE INDEX IF NOT EXISTS notifications_event_identity ON notifications (scope_key, condition_key, event_key, event_state_key, effect_fingerprint)"
+NOTIFICATIONS_TABLE_SQL = "CREATE TABLE IF NOT EXISTS notifications (notification_id TEXT PRIMARY KEY, scope_key TEXT NOT NULL, condition_key TEXT NOT NULL CHECK (condition_key IN ('blocking', 'severe-risk')), item_key TEXT NOT NULL, event_state_key TEXT NOT NULL, effect_fingerprint TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('sending', 'accepted', 'failed', 'deduplicated')), created_at REAL NOT NULL, updated_at REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, http_status INTEGER, last_error TEXT)"
+NOTIFICATIONS_INDEX_SQL = "CREATE UNIQUE INDEX IF NOT EXISTS notifications_item_identity ON notifications (scope_key, condition_key, item_key, event_state_key, effect_fingerprint)"
 
 SCHEMA_SQL = "\n".join(
     (

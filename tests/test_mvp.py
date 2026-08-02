@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 from notify_me.cli import run_cli
+from notify_me.constants import MANAGED_BLOCK
 from notify_me.errors import NotifyMeError
 from notify_me.runtime import resolve_scope
 from notify_me.transport import FakeBarkTransport, TransportResult
@@ -19,7 +20,7 @@ class MvpActivationTests(unittest.TestCase):
             env=env,
             secret_reader=lambda prompt: "https://bark.example/Abcdef12_key",
         )
-        self.assertEqual(run_cli(["test"], env=env, transport=fake)["status"], "delivered")
+        self.assertEqual(run_cli(["test"], env=env, transport=fake)["status"], "accepted")
         self.assertEqual(
             run_cli(["onboarding", "confirm"], env=env)["status"], "test-confirmed"
         )
@@ -30,7 +31,7 @@ class MvpActivationTests(unittest.TestCase):
         self.assertTrue(installed["ok"], installed)
         env["NOTIFY_ME_TEST_SCOPE"] = env["NOTIFY_ME_TEST_SCOPE"] + "-new"
         activated = run_cli(
-            ["activation", "verify", "--new-task"], env=env
+            ["activation", "verify"], env=env
         )
         self.assertEqual(activated["status"], "active", activated)
 
@@ -83,7 +84,114 @@ class MvpActivationTests(unittest.TestCase):
                         "SELECT name FROM sqlite_master WHERE type = 'table'"
                     )
                 }
+                columns = {
+                    row[1]
+                    for row in connection.execute("PRAGMA table_info(notifications)")
+                }
+                indexes = {
+                    row[1]
+                    for row in connection.execute("PRAGMA index_list(notifications)")
+                }
+                index_columns = [
+                    row[2]
+                    for row in sorted(
+                        connection.execute("PRAGMA index_info(notifications_item_identity)"),
+                        key=lambda row: row[0],
+                    )
+                ]
             self.assertTrue({"schema_migrations", "settings", "notifications"} <= tables)
+            self.assertIn("item_key", columns)
+            self.assertNotIn("event_key", columns)
+            self.assertIn("notifications_item_identity", indexes)
+            self.assertEqual(
+                index_columns,
+                ["scope_key", "condition_key", "item_key", "event_state_key", "effect_fingerprint"],
+            )
+
+    def test_dangling_private_state_symlink_is_refused(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_dir = Path(temp_dir, "private")
+            config_dir.mkdir()
+            (config_dir / "state.sqlite3").symlink_to(Path(temp_dir, "missing.sqlite3"))
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(config_dir),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+            }
+
+            result = run_cli(["onboarding", "initialize"], env=env)
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["error"]["code"], "unsafe_state_path")
+
+    def test_schema_checksum_mismatch_is_degraded_and_not_reinitialized(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+            }
+            self.assertTrue(run_cli(["onboarding", "initialize"], env=env)["ok"])
+            database = Path(env["NOTIFY_ME_CONFIG_DIR"], "state.sqlite3")
+            with sqlite3.connect(database) as connection:
+                connection.execute(
+                    "UPDATE schema_migrations SET checksum = 'tampered' WHERE version = 3"
+                )
+                connection.commit()
+
+            status = run_cli(["status"], env=env)
+            initialize = run_cli(["onboarding", "initialize"], env=env)
+
+            self.assertEqual(status["state_database"]["status"], "degraded")
+            self.assertFalse(initialize["ok"])
+            self.assertEqual(initialize["error"]["code"], "state_schema_mismatch")
+
+    def test_v2_notification_schema_migrates_item_and_accepted_names(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir, "private", "state.sqlite3")
+            database.parent.mkdir()
+            with sqlite3.connect(database) as connection:
+                connection.executescript(
+                    """
+                    CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, checksum TEXT NOT NULL, applied_at REAL NOT NULL);
+                    INSERT INTO schema_migrations VALUES (2, 'old', 1.0);
+                    CREATE TABLE settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at REAL NOT NULL);
+                    CREATE TABLE notifications (
+                        notification_id TEXT PRIMARY KEY,
+                        scope_key TEXT NOT NULL,
+                        condition_key TEXT NOT NULL CHECK (condition_key IN ('blocking', 'severe-risk')),
+                        event_key TEXT NOT NULL,
+                        event_state_key TEXT NOT NULL,
+                        effect_fingerprint TEXT NOT NULL,
+                        status TEXT NOT NULL CHECK (status IN ('sending', 'delivered', 'failed', 'deduplicated')),
+                        created_at REAL NOT NULL,
+                        updated_at REAL NOT NULL,
+                        attempts INTEGER NOT NULL DEFAULT 0,
+                        http_status INTEGER,
+                        last_error TEXT
+                    );
+                    CREATE UNIQUE INDEX notifications_event_identity
+                        ON notifications (scope_key, condition_key, event_key, event_state_key, effect_fingerprint);
+                    INSERT INTO notifications VALUES ('nm_1', 'scope', 'blocking', 'item', 'state', 'effect', 'delivered', 1.0, 1.0, 1, 200, NULL);
+                    """
+                )
+
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(database.parent),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+            }
+            result = run_cli(["onboarding", "initialize"], env=env)
+
+            self.assertTrue(result["ok"], result)
+            with sqlite3.connect(database) as connection:
+                columns = {
+                    row[1]
+                    for row in connection.execute("PRAGMA table_info(notifications)")
+                }
+                row = connection.execute(
+                    "SELECT item_key, status FROM notifications WHERE notification_id = 'nm_1'"
+                ).fetchone()
+            self.assertIn("item_key", columns)
+            self.assertNotIn("event_key", columns)
+            self.assertEqual(row, ("item", "accepted"))
 
     def test_setup_uses_hidden_input_and_keeps_binding_out_of_sqlite_and_result(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -139,7 +247,7 @@ class MvpActivationTests(unittest.TestCase):
                     "send",
                     "--condition-id",
                     "blocking",
-                    "--event-id",
+                    "--item-id",
                     "e1",
                     "--state",
                     "waiting-for-user",
@@ -176,7 +284,7 @@ class MvpActivationTests(unittest.TestCase):
             confirmed = run_cli(["onboarding", "confirm"], env=env)
 
             self.assertEqual(before_test["error"]["code"], "test_not_accepted")
-            self.assertEqual(accepted["status"], "delivered")
+            self.assertEqual(accepted["status"], "accepted")
             self.assertEqual(accepted["phone_status"], "unverified")
             self.assertEqual(confirmed["status"], "test-confirmed")
 
@@ -197,7 +305,7 @@ class MvpActivationTests(unittest.TestCase):
                     "send",
                     "--condition-id",
                     "blocking",
-                    "--event-id",
+                    "--item-id",
                     "event-blocking-1",
                     "--state",
                     "waiting-for-approval",
@@ -207,14 +315,21 @@ class MvpActivationTests(unittest.TestCase):
                 env=env,
                 transport=fake,
             )
-            self.assertEqual(blocking["status"], "delivered")
+            self.assertEqual(blocking["status"], "accepted")
             p1 = fake.payloads[-1]
-            self.assertEqual(p1["device_key"], "Abcdef12_key")
-            self.assertEqual(p1["level"], "timeSensitive")
-            self.assertEqual(p1["sound"], "telegraph")
-            self.assertEqual(p1["group"], "codex")
-            self.assertNotIn("volume", p1)
-            self.assertNotIn("call", p1)
+            self.assertEqual(
+                p1,
+                {
+                    "device_key": "Abcdef12_key",
+                    "title": "🖐 需要操作｜Notify Me",
+                    "body": "请批准文件访问",
+                    "group": "codex",
+                    "icon": "https://hcn58q8zsfep.feishuapp.com/app/app_17acsapfz2z/codex-bark-icon.png",
+                    "id": blocking["notification_id"],
+                    "level": "timeSensitive",
+                    "sound": "telegraph",
+                },
+            )
             self.assertNotIn("event-blocking-1", json.dumps(blocking, ensure_ascii=False))
             state_bytes = Path(env["NOTIFY_ME_CONFIG_DIR"], "state.sqlite3").read_bytes()
             self.assertNotIn(b"waiting-for-approval", state_bytes)
@@ -236,7 +351,7 @@ class MvpActivationTests(unittest.TestCase):
                     "send",
                     "--condition-id",
                     "severe-risk",
-                    "--event-id",
+                    "--item-id",
                     "event-severe-1",
                     "--state",
                     "rollback-guarantee-lost",
@@ -247,15 +362,24 @@ class MvpActivationTests(unittest.TestCase):
                 transport=fake,
             )
 
-            self.assertEqual(severe["status"], "delivered")
+            self.assertEqual(severe["status"], "accepted")
             self.assertEqual(severe["condition_id"], "severe-risk")
             self.assertEqual(severe["priority"], "P0")
             p0 = fake.payloads[-1]
-            self.assertEqual(p0["level"], "critical")
-            self.assertEqual(p0["sound"], "alarm")
-            self.assertEqual(p0["volume"], 8)
-            self.assertEqual(p0["group"], "codex")
-            self.assertNotIn("call", p0)
+            self.assertEqual(
+                p0,
+                {
+                    "device_key": "Abcdef12_key",
+                    "title": "🚨 严重风险｜Notify Me",
+                    "body": "请立即确认是否停止操作",
+                    "group": "codex",
+                    "icon": "https://hcn58q8zsfep.feishuapp.com/app/app_17acsapfz2z/codex-bark-icon.png",
+                    "id": severe["notification_id"],
+                    "level": "critical",
+                    "sound": "alarm",
+                    "volume": 8,
+                },
+            )
             self.assertNotIn("event-severe-1", json.dumps(severe, ensure_ascii=False))
             state_bytes = Path(env["NOTIFY_ME_CONFIG_DIR"], "state.sqlite3").read_bytes()
             self.assertNotIn(b"rollback-guarantee-lost", state_bytes)
@@ -286,7 +410,7 @@ class MvpActivationTests(unittest.TestCase):
                             "send",
                             "--condition-id",
                             "severe-risk",
-                            "--event-id",
+                            "--item-id",
                             "worker-event",
                             "--state",
                             "worker-state",
@@ -333,7 +457,7 @@ class MvpActivationTests(unittest.TestCase):
                             "send",
                             "--condition-id",
                             condition,
-                            "--event-id",
+                            "--item-id",
                             "non-notification-event",
                             "--state",
                             "non-notification-state",
@@ -362,7 +486,7 @@ class MvpActivationTests(unittest.TestCase):
                 "send",
                 "--condition-id",
                 "blocking",
-                "--event-id",
+                "--item-id",
                 "event-1",
                 "--state",
                 "same-state",
@@ -374,9 +498,44 @@ class MvpActivationTests(unittest.TestCase):
             first = run_cli(arguments, env=env, transport=fake)
             second = run_cli(arguments, env=env, transport=fake)
 
-            self.assertEqual(first["status"], "delivered")
+            self.assertEqual(first["status"], "accepted")
             self.assertEqual(second["status"], "deduplicated")
             self.assertEqual(len(fake.payloads), payloads_before + 1)
+
+    def test_active_task_stops_sending_after_managed_rule_drift(self):
+        fake = FakeBarkTransport()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "fixture-scope-01",
+                "CODEX_THREAD_ID": None,
+            }
+            self.prepare_active(env, fake)
+            agents = Path(env["CODEX_HOME"], "AGENTS.md")
+            agents.write_text(MANAGED_BLOCK.replace("任务阻塞", "规则漂移") + "\n", encoding="utf-8")
+            payload_count = len(fake.payloads)
+
+            result = run_cli(
+                [
+                    "send",
+                    "--condition-id",
+                    "blocking",
+                    "--item-id",
+                    "drifted-item",
+                    "--state",
+                    "waiting",
+                    "--action",
+                    "不应发送",
+                ],
+                env=env,
+                transport=fake,
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["error"]["code"], "activation_required")
+            self.assertEqual(len(fake.payloads), payload_count)
 
     def test_delivery_failures_are_actionable_and_do_not_echo_sensitive_inputs(self):
         accepted = FakeBarkTransport()
@@ -397,7 +556,7 @@ class MvpActivationTests(unittest.TestCase):
                     "send",
                     "--condition-id",
                     "blocking",
-                    "--event-id",
+                    "--item-id",
                     "event-secret-01",
                     "--state",
                     "prompt-secret-state",
@@ -420,6 +579,76 @@ class MvpActivationTests(unittest.TestCase):
                 "Abcdef12_key",
             ):
                 self.assertNotIn(secret, serialized)
+
+    def test_failed_notification_can_be_retried_with_the_same_item_and_state(self):
+        fake = FakeBarkTransport()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "fixture-scope-01",
+                "CODEX_THREAD_ID": None,
+            }
+            self.prepare_active(env, fake)
+            fake.results = [
+                TransportResult(False, False, "permanent_http", 400),
+                TransportResult(True, False, "accepted", 200),
+            ]
+            arguments = [
+                "send",
+                "--condition-id",
+                "blocking",
+                "--item-id",
+                "retryable-item",
+                "--state",
+                "waiting",
+                "--action",
+                "请处理",
+            ]
+
+            first = run_cli(arguments, env=env, transport=fake)
+            second = run_cli(arguments, env=env, transport=fake)
+
+            self.assertEqual(first["status"], "failed")
+            self.assertEqual(second["status"], "accepted")
+            self.assertEqual(first["notification_id"], second["notification_id"])
+
+    def test_stale_sending_notification_can_be_reclaimed(self):
+        fake = FakeBarkTransport()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "fixture-scope-01",
+                "CODEX_THREAD_ID": None,
+            }
+            self.prepare_active(env, fake)
+            arguments = [
+                "send",
+                "--condition-id",
+                "blocking",
+                "--item-id",
+                "stale-item",
+                "--state",
+                "waiting",
+                "--action",
+                "请处理",
+            ]
+            first = run_cli(arguments, env=env, transport=fake)
+            database = Path(env["NOTIFY_ME_CONFIG_DIR"], "state.sqlite3")
+            with sqlite3.connect(database) as connection:
+                connection.execute(
+                    "UPDATE notifications SET status = 'sending', updated_at = 0 WHERE notification_id = ?",
+                    (first["notification_id"],),
+                )
+                connection.commit()
+
+            reclaimed = run_cli(arguments, env=env, transport=fake)
+
+            self.assertEqual(reclaimed["status"], "accepted")
+            self.assertEqual(reclaimed["notification_id"], first["notification_id"])
 
 
 if __name__ == "__main__":

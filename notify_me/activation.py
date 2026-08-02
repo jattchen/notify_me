@@ -5,8 +5,14 @@ import os
 import re
 import stat
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - the supported MVP hosts provide fcntl.
+    fcntl = None
 
 from .constants import MANAGED_BLOCK, MANAGED_BLOCK_HASH
 from .errors import NotifyMeError
@@ -26,6 +32,7 @@ class AgentsTarget:
     is_regular: bool
     data: bytes
     mode: int
+    identity: tuple = None
 
 
 def _code_home(env):
@@ -35,20 +42,43 @@ def _code_home(env):
 
 def _read_candidate(path, source):
     if path.is_symlink():
-        return AgentsTarget(path, source, True, True, False, b"", 0)
+        try:
+            info = path.lstat()
+            identity = (info.st_dev, info.st_ino)
+        except OSError:
+            identity = None
+        return AgentsTarget(path, source, True, True, False, b"", 0, identity)
     if not path.exists():
-        return AgentsTarget(path, source, False, False, False, b"", 0)
+        return AgentsTarget(path, source, False, False, False, b"", 0, None)
     try:
         info = path.lstat()
     except OSError as exc:
         raise NotifyMeError("agents_read_error", "无法读取生效的 AGENTS 文件") from exc
     if not stat.S_ISREG(info.st_mode):
-        return AgentsTarget(path, source, True, False, False, b"", stat.S_IMODE(info.st_mode))
+        return AgentsTarget(
+            path,
+            source,
+            True,
+            False,
+            False,
+            b"",
+            stat.S_IMODE(info.st_mode),
+            (info.st_dev, info.st_ino),
+        )
     try:
         data = path.read_bytes()
     except OSError as exc:
         raise NotifyMeError("agents_read_error", "无法读取生效的 AGENTS 文件") from exc
-    return AgentsTarget(path, source, True, False, True, data, stat.S_IMODE(info.st_mode))
+    return AgentsTarget(
+        path,
+        source,
+        True,
+        False,
+        True,
+        data,
+        stat.S_IMODE(info.st_mode),
+        (info.st_dev, info.st_ino),
+    )
 
 
 def effective_agents(env=None):
@@ -152,40 +182,107 @@ def plan_agents_rule(env=None):
     }
 
 
-def _atomic_write(path, data, mode):
-    path.parent.mkdir(parents=True, exist_ok=True)
+@contextmanager
+def _directory_lock(directory):
+    if fcntl is None:
+        raise NotifyMeError("agents_lock_unavailable", "当前环境无法安全串行写入 AGENTS 文件")
     descriptor = None
-    temporary = None
     try:
-        descriptor, temporary = tempfile.mkstemp(
-            prefix=".notify-me-agents-", dir=str(path.parent)
-        )
-        os.fchmod(descriptor, mode or 0o600)
-        with os.fdopen(descriptor, "wb") as handle:
-            descriptor = None
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, str(path))
-        temporary = None
-        try:
-            directory_descriptor = os.open(str(path.parent), os.O_RDONLY)
-            try:
-                os.fsync(directory_descriptor)
-            finally:
-                os.close(directory_descriptor)
-        except OSError:
-            pass
+        descriptor = os.open(str(directory), os.O_RDONLY)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
     except OSError as exc:
-        raise NotifyMeError("agents_atomic_write_failed", "无法原子写入生效的 AGENTS 文件") from exc
-    finally:
         if descriptor is not None:
             os.close(descriptor)
-        if temporary:
+        raise NotifyMeError("agents_lock_failed", "无法锁定生效的 AGENTS 文件目录") from exc
+    try:
+        yield
+    finally:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
+
+
+def _atomic_write(path, data, mode, expected, values=None):
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise NotifyMeError("agents_atomic_write_failed", "无法准备生效的 AGENTS 文件目录") from exc
+
+    descriptor = None
+    temporary = None
+    with _directory_lock(path.parent):
+        current = effective_agents(values) if values is not None else _read_candidate(path, expected.source)
+        if current.path != expected.path or current.source != expected.source:
+            raise NotifyMeError("agents_changed", "生效的 AGENTS 目标在写入前发生变化")
+        if current.is_symlink or (current.exists and not current.is_regular):
+            raise NotifyMeError("unsafe_agents_target", "生效的 AGENTS 文件在写入时变得不安全")
+        if (
+            current.exists != expected.exists
+            or current.data != expected.data
+            or current.identity != expected.identity
+        ):
+            raise NotifyMeError("agents_changed", "生效的 AGENTS 文件在写入前发生变化")
+        try:
+            descriptor, temporary = tempfile.mkstemp(
+                prefix=".notify-me-agents-", dir=str(path.parent)
+            )
+            os.fchmod(descriptor, mode or 0o600)
+            with os.fdopen(descriptor, "wb") as handle:
+                descriptor = None
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            before_replace = effective_agents(values) if values is not None else _read_candidate(path, expected.source)
+            if before_replace.path != expected.path or before_replace.source != expected.source:
+                raise NotifyMeError("agents_changed", "生效的 AGENTS 目标在替换前发生变化")
+            if before_replace.is_symlink or (before_replace.exists and not before_replace.is_regular):
+                raise NotifyMeError("unsafe_agents_target", "生效的 AGENTS 文件在替换前变得不安全")
+            if (
+                before_replace.exists != expected.exists
+                or before_replace.data != expected.data
+                or before_replace.identity != expected.identity
+            ):
+                raise NotifyMeError("agents_changed", "生效的 AGENTS 文件在替换前发生变化")
+            os.replace(temporary, str(path))
+            temporary = None
             try:
-                os.unlink(temporary)
+                verified = path.read_bytes()
+            except OSError as exc:
+                raise NotifyMeError("agents_verify_failed", "托管规则写入后无法验证") from exc
+            if verified != data:
+                raise NotifyMeError("agents_verify_failed", "托管规则写入后校验不一致")
+            effective_after_replace = (
+                effective_agents(values) if values is not None else _read_candidate(path, expected.source)
+            )
+            if (
+                effective_after_replace.path != expected.path
+                or effective_after_replace.source != expected.source
+                or effective_after_replace.is_symlink
+                or (effective_after_replace.exists and not effective_after_replace.is_regular)
+                or effective_after_replace.data != data
+            ):
+                raise NotifyMeError("agents_changed", "生效的 AGENTS 目标在替换后发生变化")
+            try:
+                directory_descriptor = os.open(str(path.parent), os.O_RDONLY)
+                try:
+                    os.fsync(directory_descriptor)
+                finally:
+                    os.close(directory_descriptor)
             except OSError:
                 pass
+        except NotifyMeError:
+            raise
+        except OSError as exc:
+            raise NotifyMeError("agents_atomic_write_failed", "无法原子写入生效的 AGENTS 文件") from exc
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            if temporary:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
 
 
 def commit_agents_rule(env=None, authorize=False, expected_sha256=None):
@@ -213,10 +310,20 @@ def commit_agents_rule(env=None, authorize=False, expected_sha256=None):
     latest = _read_candidate(target.path, target.source)
     if latest.is_symlink or (latest.exists and not latest.is_regular):
         raise NotifyMeError("unsafe_agents_target", "生效的 AGENTS 文件在写入前变得不安全")
-    if latest.exists != target.exists or latest.data != target.data:
+    if (
+        latest.exists != target.exists
+        or latest.data != target.data
+        or latest.identity != target.identity
+    ):
         raise NotifyMeError("agents_changed", "生效的 AGENTS 文件在授权前发生变化")
     if candidate != target.data:
-        _atomic_write(target.path, candidate, target.mode if target.exists else 0o600)
+        _atomic_write(
+            target.path,
+            candidate,
+            target.mode if target.exists else 0o600,
+            expected=target,
+            values=values,
+        )
     try:
         verified = target.path.read_bytes()
     except OSError as exc:
@@ -233,7 +340,7 @@ def commit_agents_rule(env=None, authorize=False, expected_sha256=None):
     }
 
 
-def verify_agents_rule(env=None, new_task=False):
+def verify_agents_rule(env=None):
     target = effective_agents(os.environ if env is None else env)
     if target.is_symlink or (target.exists and not target.is_regular):
         raise NotifyMeError("unsafe_agents_target", "生效的 AGENTS 文件不安全")
@@ -245,10 +352,9 @@ def verify_agents_rule(env=None, new_task=False):
             "source": target.source,
         }
     return {
-        "status": "active" if new_task else "restart-required",
+        "status": "installed",
         "path": str(target.path),
         "source": target.source,
         "managed_block_sha256": MANAGED_BLOCK_HASH,
         "file_sha256": _sha(target.data),
-        "restart_required": not new_task,
     }

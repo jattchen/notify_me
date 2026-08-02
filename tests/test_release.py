@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -35,7 +38,7 @@ class MvpPackageContractTests(unittest.TestCase):
                 secret_reader=lambda prompt: "https://bark.example/Abcdef12_key",
             )
             fake = FakeBarkTransport()
-            self.assertEqual(run_cli(["test"], env=env, transport=fake)["status"], "delivered")
+            self.assertEqual(run_cli(["test"], env=env, transport=fake)["status"], "accepted")
             self.assertEqual(
                 run_cli(["onboarding", "confirm"], env=env)["status"],
                 "test-confirmed",
@@ -46,7 +49,7 @@ class MvpPackageContractTests(unittest.TestCase):
             self.assertTrue(run_cli(["agents-rule", "commit", "--authorize"], env=env)["ok"])
             env["NOTIFY_ME_TEST_SCOPE"] += "-new"
             self.assertEqual(
-                run_cli(["activation", "verify", "--new-task"], env=env)["status"],
+                run_cli(["activation", "verify"], env=env)["status"],
                 "active",
             )
             payloads_before = len(fake.payloads)
@@ -55,7 +58,7 @@ class MvpPackageContractTests(unittest.TestCase):
                     "send",
                     "--condition-id",
                     "unsupported-condition",
-                    "--event-id",
+                    "--item-id",
                     "event-1",
                     "--state",
                     "state-1",
@@ -79,6 +82,29 @@ class MvpPackageContractTests(unittest.TestCase):
         self.assertIn("onboarding confirm", skill)
         self.assertNotIn("每轮", skill)
 
+    def test_installed_skill_wrapper_runs_from_a_non_repository_cwd(self):
+        root = Path(__file__).resolve().parents[1]
+        wrapper = root / "skills" / "notify-me" / "scripts" / "notify_me.py"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = os.environ.copy()
+            env.update(
+                {
+                    "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                    "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                }
+            )
+            result = subprocess.run(
+                [sys.executable, str(wrapper), "onboarding", "inspect"],
+                cwd=temp_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["status"], "unconfigured")
+
     def test_skill_and_manifest_describe_both_fixed_conditions_without_hooks(self):
         root = Path(__file__).resolve().parents[1]
         skill = (root / "skills" / "notify-me" / "SKILL.md").read_text()
@@ -89,5 +115,7 @@ class MvpPackageContractTests(unittest.TestCase):
         self.assertIn("P1", skill)
         self.assertIn("可自动恢复", skill)
         self.assertIn("Agent 即将结束", skill)
+        self.assertNotIn("python3 notify_me.py", skill)
+        self.assertIn("scripts/notify_me.py", skill)
         self.assertNotIn("hooks", manifest)
         self.assertFalse((root / "hooks").exists())

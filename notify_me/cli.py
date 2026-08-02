@@ -60,46 +60,45 @@ def _bool_option(options, name):
 
 
 def _activation_scope_fingerprint(store, env):
+    canonical_scope = resolve_scope(env)
+    salt = store.get_setting("scope_salt")
+    if not isinstance(salt, str) or not salt:
+        raise NotifyMeError("scope_unavailable", "当前任务作用域无法验证")
     try:
-        canonical_scope = resolve_scope(env)
-        salt = store.get_setting("scope_salt")
         secret = bytes.fromhex(salt)
-    except NotifyMeError as exc:
-        if exc.code == "scope_conflict":
-            raise
-        return None
-    except (TypeError, ValueError):
-        return None
+    except (TypeError, ValueError) as exc:
+        raise NotifyMeError("scope_unavailable", "当前任务作用域无法验证") from exc
     return hmac.new(
         secret, canonical_scope.encode("utf-8"), hashlib.sha256
     ).hexdigest()
 
 
-def _record_rule_install(store, env):
+def _record_rule_install(store, fingerprint):
     if not store.paths.state_db.exists():
         return
     store.set_setting("agents_rule_state", "restart-required")
-    fingerprint = _activation_scope_fingerprint(store, env)
-    if fingerprint:
-        store.set_setting("agents_rule_scope_fingerprint", fingerprint)
+    store.set_setting("agents_rule_scope_fingerprint", fingerprint)
     store.set_setting("onboarding_state", "restart-required")
 
 
 def _verify_rule_activation(store, env, result):
-    if result.get("status") != "active" or not store.paths.state_db.exists():
+    if result.get("status") != "installed" or not store.paths.state_db.exists():
         return result
     stored = store.get_setting("agents_rule_scope_fingerprint")
-    if stored:
-        current = _activation_scope_fingerprint(store, env)
-        if not current or hmac.compare_digest(stored, current):
-            result = dict(result)
-            result["status"] = "restart-required"
-            result["restart_required"] = True
-            result["task_scope_verified"] = False
-            return result
+    if not isinstance(stored, str) or not stored:
+        raise NotifyMeError("scope_unavailable", "规则安装任务作用域无法验证")
+    current = _activation_scope_fingerprint(store, env)
+    if hmac.compare_digest(stored, current):
         result = dict(result)
-        result["task_scope_verified"] = True
-        store.set_setting("onboarding_state", "active")
+        result["status"] = "restart-required"
+        result["restart_required"] = True
+        result["task_scope_verified"] = False
+        return result
+    result = dict(result)
+    result["status"] = "active"
+    result["restart_required"] = False
+    result["task_scope_verified"] = True
+    store.set_setting("onboarding_state", "active")
     return result
 
 
@@ -140,7 +139,7 @@ def _status(env, store):
         except NotifyMeError:
             bound = False
     try:
-        agents = verify_agents_rule(env, new_task=False)
+        agents = verify_agents_rule(env)
     except NotifyMeError as exc:
         agents = {"status": "error", "error": {"code": exc.code}}
     return {
@@ -218,7 +217,7 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
         options = _options(argv[1:])
         allowed = {
             "condition-id",
-            "event-id",
+            "item-id",
             "state",
             "action",
             "private",
@@ -234,9 +233,12 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
         store.require_initialized()
         if store.get_setting("onboarding_state") != "active":
             raise NotifyMeError("activation_required", "请完成用户确认和新任务验活后再发送通知")
+        rule = _verify_rule_activation(store, env, verify_agents_rule(env))
+        if rule.get("status") != "active":
+            raise NotifyMeError("activation_required", "托管规则未在当前任务中生效")
         endpoint = load_endpoint(paths)
         condition_id = _required(options, "condition-id")
-        event_id = _required(options, "event-id")
+        item_id = _required(options, "item-id")
         state = _required(options, "state")
         action = options.get("action", "请查看 Codex 中待处理事项")
         private = _bool_option(options, "private") if "private" in options else False
@@ -247,7 +249,7 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
                 endpoint,
                 transport,
                 condition_id,
-                event_id,
+                item_id,
                 state,
                 action,
                 private=private,
@@ -262,10 +264,9 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
         if len(argv) < 2 or argv[1] != "verify":
             raise NotifyMeError("unsupported_command", "当前 MVP 命令不可用")
         options = _options(argv[2:])
-        if set(options) - {"new-task"}:
+        if options:
             raise NotifyMeError("invalid_arguments", "verify 参数不受支持")
-        new_task = _bool_option(options, "new-task") if "new-task" in options else False
-        result = verify_agents_rule(env, new_task=new_task)
+        result = verify_agents_rule(env)
         return {"ok": True, **_verify_rule_activation(store, env, result)}
 
     if command == "agents-rule":
@@ -277,10 +278,9 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
                 raise NotifyMeError("invalid_arguments", "plan 不接受命令参数")
             return {"ok": True, **plan_agents_rule(env)}
         if argv[1] == "verify":
-            if set(options) - {"new-task"}:
+            if options:
                 raise NotifyMeError("invalid_arguments", "verify 参数不受支持")
-            new_task = _bool_option(options, "new-task") if "new-task" in options else False
-            result = verify_agents_rule(env, new_task=new_task)
+            result = verify_agents_rule(env)
             return {"ok": True, **_verify_rule_activation(store, env, result)}
         allowed = {"authorize", "yes", "expected-sha256"}
         if set(options) - allowed:
@@ -299,7 +299,7 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
             raise NotifyMeError("invalid_arguments", "expected-sha256 格式无效")
         if isinstance(expected, str):
             expected = expected.lower()
-        _activation_scope_fingerprint(store, env)
+        install_fingerprint = _activation_scope_fingerprint(store, env)
         result = {
             "ok": True,
             **commit_agents_rule(
@@ -309,7 +309,7 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
             ),
         }
         if onboarding_state == "test-confirmed" or result["changed"]:
-            _record_rule_install(store, env)
+            _record_rule_install(store, install_fingerprint)
         return result
 
     if command in ("status", "doctor"):

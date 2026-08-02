@@ -1,7 +1,10 @@
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+import notify_me.activation as activation
 from notify_me.cli import run_cli
 from notify_me.constants import MANAGED_BLOCK
 from notify_me.storage import StateStore, resolve_storage_paths
@@ -13,6 +16,8 @@ class AgentsRuleActivationTests(unittest.TestCase):
         return {
             "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
             "CODEX_HOME": str(Path(temp_dir) / "codex"),
+            "NOTIFY_ME_TEST_MODE": "1",
+            "NOTIFY_ME_TEST_SCOPE": "activation-install-scope",
             "CODEX_THREAD_ID": None,
         }
 
@@ -24,7 +29,7 @@ class AgentsRuleActivationTests(unittest.TestCase):
             secret_reader=lambda prompt: "https://bark.example/Abcdef12_key",
         )
         accepted = run_cli(["test"], env=env, transport=FakeBarkTransport())
-        self.assertEqual(accepted["status"], "delivered")
+        self.assertEqual(accepted["status"], "accepted")
         confirmed = run_cli(["onboarding", "confirm"], env=env)
         self.assertEqual(confirmed["status"], "test-confirmed")
 
@@ -63,8 +68,9 @@ class AgentsRuleActivationTests(unittest.TestCase):
 
             run_cli(["agents-rule", "commit", "--yes"], env=env)
             current = run_cli(["activation", "verify"], env=env)
+            env["NOTIFY_ME_TEST_SCOPE"] = "activation-new-task-scope"
             new_task = run_cli(
-                ["activation", "verify", "--new-task"],
+                ["activation", "verify"],
                 env=env,
             )
 
@@ -123,6 +129,53 @@ class AgentsRuleActivationTests(unittest.TestCase):
             self.assertEqual(result["error"]["code"], "agents_changed")
             self.assertEqual(default.read_text(encoding="utf-8"), "default\n")
             self.assertEqual(override.read_text(encoding="utf-8"), "override appeared\n")
+
+    def test_override_created_before_replace_stops_without_writing_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            self.prepare_activation(env)
+            codex_home = Path(env["CODEX_HOME"])
+            codex_home.mkdir()
+            default = codex_home / "AGENTS.md"
+            override = codex_home / "AGENTS.override.md"
+            default.write_text("default\n", encoding="utf-8")
+            original = activation._atomic_write
+
+            def create_override_then_write(*args, **kwargs):
+                override.write_text("override appeared\n", encoding="utf-8")
+                return original(*args, **kwargs)
+
+            with patch("notify_me.activation._atomic_write", side_effect=create_override_then_write):
+                result = run_cli(["agents-rule", "commit", "--authorize"], env=env)
+
+            self.assertEqual(result["error"]["code"], "agents_changed")
+            self.assertEqual(default.read_text(encoding="utf-8"), "default\n")
+            self.assertEqual(override.read_text(encoding="utf-8"), "override appeared\n")
+
+    def test_content_changed_before_replace_is_detected(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            self.prepare_activation(env)
+            codex_home = Path(env["CODEX_HOME"])
+            codex_home.mkdir()
+            agents = codex_home / "AGENTS.md"
+            agents.write_text("before\n", encoding="utf-8")
+            original_fsync = activation.os.fsync
+            mutated = False
+
+            def fsync_then_mutate(descriptor):
+                nonlocal mutated
+                result = original_fsync(descriptor)
+                if not mutated:
+                    agents.write_text("changed outside lock\n", encoding="utf-8")
+                    mutated = True
+                return result
+
+            with patch("notify_me.activation.os.fsync", side_effect=fsync_then_mutate):
+                result = run_cli(["agents-rule", "commit", "--authorize"], env=env)
+
+            self.assertEqual(result["error"]["code"], "agents_changed")
+            self.assertEqual(agents.read_text(encoding="utf-8"), "changed outside lock\n")
 
     def test_symlink_and_duplicate_markers_are_refused(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -184,11 +237,11 @@ class AgentsRuleActivationTests(unittest.TestCase):
             self.assertIsNotNone(store.get_setting("agents_rule_scope_fingerprint"))
 
             same_scope = run_cli(
-                ["activation", "verify", "--new-task"], env=env
+                ["activation", "verify"], env=env
             )
             env["NOTIFY_ME_TEST_SCOPE"] = "scope-after-install"
             different_scope = run_cli(
-                ["activation", "verify", "--new-task"], env=env
+                ["activation", "verify"], env=env
             )
 
             self.assertEqual(same_scope["status"], "restart-required")
@@ -207,7 +260,7 @@ class AgentsRuleActivationTests(unittest.TestCase):
                 secret_reader=lambda prompt: "https://bark.example/Abcdef12_key",
             )
             self.assertEqual(
-                run_cli(["test"], env=env, transport=fake)["status"], "delivered"
+                run_cli(["test"], env=env, transport=fake)["status"], "accepted"
             )
             self.assertEqual(
                 run_cli(["onboarding", "confirm"], env=env)["status"],
@@ -229,7 +282,7 @@ class AgentsRuleActivationTests(unittest.TestCase):
 
             env["NOTIFY_ME_TEST_SCOPE"] = "new-task"
             activated = run_cli(
-                ["activation", "verify", "--new-task"], env=env
+                ["activation", "verify"], env=env
             )
             self.assertEqual(activated["status"], "active")
             self.assertEqual(len(fake.payloads), 1)
@@ -254,3 +307,88 @@ class AgentsRuleActivationTests(unittest.TestCase):
 
             self.assertEqual(result["error"]["code"], "managed_block_drift")
             self.assertIn("用户阻塞", agents.read_text(encoding="utf-8"))
+
+    def test_scope_is_required_for_install_and_activation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            self.prepare_activation(env)
+            codex_home = Path(env["CODEX_HOME"])
+            codex_home.mkdir()
+            agents = codex_home / "AGENTS.md"
+            agents.write_text("user\n", encoding="utf-8")
+            env["NOTIFY_ME_TEST_SCOPE"] = None
+
+            install = run_cli(["agents-rule", "commit", "--authorize"], env=env)
+
+            self.assertFalse(install["ok"])
+            self.assertEqual(install["error"]["code"], "scope_unavailable")
+            self.assertEqual(agents.read_text(encoding="utf-8"), "user\n")
+
+    def test_same_scope_or_missing_scope_never_reports_active(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            self.prepare_activation(env)
+            codex_home = Path(env["CODEX_HOME"])
+            codex_home.mkdir()
+            (codex_home / "AGENTS.md").write_text("user\n", encoding="utf-8")
+            installed = run_cli(["agents-rule", "commit", "--authorize"], env=env)
+            self.assertTrue(installed["ok"], installed)
+
+            same_scope = run_cli(["activation", "verify"], env=env)
+            self.assertEqual(same_scope["status"], "restart-required")
+            self.assertFalse(same_scope["task_scope_verified"])
+
+            env["NOTIFY_ME_TEST_SCOPE"] = None
+            missing_scope = run_cli(["activation", "verify"], env=env)
+            self.assertFalse(missing_scope["ok"])
+            self.assertEqual(missing_scope["error"]["code"], "scope_unavailable")
+
+    def test_legacy_new_task_flag_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            self.prepare_activation(env)
+            Path(env["CODEX_HOME"]).mkdir()
+            Path(env["CODEX_HOME"], "AGENTS.md").write_text("user\n", encoding="utf-8")
+            run_cli(["agents-rule", "commit", "--authorize"], env=env)
+
+            result = run_cli(["activation", "verify", "--new-task"], env=env)
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["error"]["code"], "invalid_arguments")
+
+    def test_cooperating_concurrent_rule_writers_serialize_and_revalidate(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            self.prepare_activation(env)
+            codex_home = Path(env["CODEX_HOME"])
+            codex_home.mkdir()
+            agents = codex_home / "AGENTS.md"
+            agents.write_text("user\n", encoding="utf-8")
+            barrier = threading.Barrier(2)
+            results = []
+
+            def commit():
+                barrier.wait()
+                results.append(run_cli(["agents-rule", "commit", "--authorize"], env=env))
+
+            original = activation._atomic_write
+            with patch("notify_me.activation._atomic_write") as atomic_write:
+
+                def synchronized_write(*args, **kwargs):
+                    barrier.wait()
+                    return original(*args, **kwargs)
+
+                atomic_write.side_effect = synchronized_write
+                threads = [threading.Thread(target=commit) for _ in range(2)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+
+            self.assertEqual(len(results), 2)
+            self.assertEqual(sum(result["ok"] for result in results), 1)
+            self.assertEqual(
+                sum(result.get("error", {}).get("code") == "agents_changed" for result in results),
+                1,
+            )
+            self.assertEqual(agents.read_text(encoding="utf-8").count(MANAGED_BLOCK), 1)

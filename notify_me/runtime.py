@@ -78,10 +78,16 @@ def resolve_scope(env):
             raise NotifyMeError("scope_unavailable", "测试作用域未明确启用")
         if candidate and candidate != fixture:
             raise NotifyMeError("scope_conflict", "任务作用域来源不一致")
-        return fixture
-    if candidate:
-        return candidate
-    raise NotifyMeError("scope_unavailable", "当前任务缺少可验证的作用域")
+        scope = fixture
+    elif candidate:
+        scope = candidate
+    else:
+        raise NotifyMeError("scope_unavailable", "当前任务缺少可验证的作用域")
+    if not isinstance(scope, str) or not scope or len(scope) > 256 or any(
+        char.isspace() for char in scope
+    ):
+        raise NotifyMeError("scope_unavailable", "当前任务作用域格式无效")
+    return scope
 
 
 def actor_is_suppressed(actor_role=None, worker_id=None, env=None):
@@ -199,7 +205,7 @@ def send_test(store, endpoint, transport, sleep=None):
     if result.accepted:
         store.set_setting("onboarding_state", "server-accepted")
         return {
-            "status": "delivered",
+            "status": "accepted",
             "category": result.category,
             "attempts": result.attempts,
             "message": "Bark 服务已接受；手机是否显示仍需由用户确认",
@@ -217,20 +223,21 @@ def send_test(store, endpoint, transport, sleep=None):
     }
 
 
-def send_condition(store, endpoint, transport, condition_id, event_id, state, action, private=False, actor_role=None, worker_id=None, env=None, sleep=None):
+def send_condition(store, endpoint, transport, condition_id, item_id, state, action, private=False, actor_role=None, worker_id=None, env=None, sleep=None):
+    """Send one event formed by a notification item and its semantic state."""
     values = os.environ if env is None else env
     if actor_is_suppressed(actor_role, worker_id, values):
         return {"status": "suppressed", "reason": "not_primary_notifier"}
     if condition_id not in CONDITION_PRIORITY:
         raise NotifyMeError("invalid_condition", "MVP 只支持 blocking 或 severe-risk")
-    if not isinstance(event_id, str) or not event_id or len(event_id) > 256:
-        raise NotifyMeError("invalid_event", "通知事件标识无效")
+    if not isinstance(item_id, str) or not item_id or len(item_id) > 256:
+        raise NotifyMeError("invalid_item", "通知事项标识无效")
     if not isinstance(state, str) or not state or len(state) > 256:
         raise NotifyMeError("invalid_state", "通知状态无效")
     canonical_scope = resolve_scope(values)
     scope_key = _scope_key(store, canonical_scope)
-    event_key = hmac.new(
-        scope_key.encode("ascii"), event_id.encode("utf-8"), hashlib.sha256
+    item_key = hmac.new(
+        scope_key.encode("ascii"), item_id.encode("utf-8"), hashlib.sha256
     ).hexdigest()
     event_state_key = hmac.new(
         scope_key.encode("ascii"), state.encode("utf-8"), hashlib.sha256
@@ -239,7 +246,7 @@ def send_condition(store, endpoint, transport, condition_id, event_id, state, ac
     effect_fingerprint = _fingerprint(effect)
     notification_id = "nm_" + hmac.new(
         scope_key.encode("ascii"),
-        (condition_id + "\0" + event_id + "\0" + state).encode("utf-8"),
+        (condition_id + "\0" + item_id + "\0" + state).encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()[:40]
     payload = build_payload(endpoint, condition_id, notification_id, action, private)
@@ -247,7 +254,7 @@ def send_condition(store, endpoint, transport, condition_id, event_id, state, ac
         "notification_id": notification_id,
         "scope_key": scope_key,
         "condition_key": condition_id,
-        "event_key": event_key,
+        "item_key": item_key,
         "event_state_key": event_state_key,
         "effect_fingerprint": effect_fingerprint,
         "status": "sending",
@@ -259,7 +266,7 @@ def send_condition(store, endpoint, transport, condition_id, event_id, state, ac
             "notification_id": notification_id,
         }
     result = transport.send_with_retry(endpoint, payload, sleep=sleep, max_attempts=2)
-    final_status = "delivered" if result.accepted else "failed"
+    final_status = "accepted" if result.accepted else "failed"
     store.update_notification(
         notification_id,
         final_status,
