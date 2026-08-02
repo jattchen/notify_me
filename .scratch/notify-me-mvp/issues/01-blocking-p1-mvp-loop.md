@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Notify Me 可以作为本地插件安装，并从只读检查进入显式初始化；初始化自动创建最小 SQLite 状态库，不要求数据库服务、Docker 或手工 SQL。
 - [ ] 首次激活会指导用户在 Bark App 中找到完整推送地址，并只通过不回显的终端私密输入完成绑定；Bark 地址和设备密钥不进入聊天、命令参数、终端回显、日志或 SQLite。
@@ -16,4 +16,3 @@
 - [ ] Subagent 或 Ticket Worker 不会自行发送该通知；遇到已知 worker 标识时返回抑制结果。
 - [ ] Ticket 的安装物不声明、不安装、不运行任何 Hook，也不存在用户订阅创建或恢复入口。
 - [ ] 自动化测试覆盖私密绑定、固定 P1 payload、Bark 成功与安全失败分类、AGENTS 托管块写入，以及普通问答与 worker 的负向场景。
-
