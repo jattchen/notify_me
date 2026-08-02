@@ -1,0 +1,6 @@
+{
+  "name": "notify-me",
+  "version": "0.1.0",
+  "description": "只在主 Agent 判断任务阻塞时发送固定 P1 的最小化 Bark 通知。",
+  "skills": ["skills/notify-me"]
+}
