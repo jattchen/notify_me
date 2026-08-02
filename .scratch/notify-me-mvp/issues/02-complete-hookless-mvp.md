@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — 跑通 Blocking/P1 最小真机闭环.
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Severe Risk 使用固定 P0 Critical 效果，Blocking 继续使用固定 P1 效果；MVP 中两者默认启用且不能调整优先级、启停状态或通知效果。
 - [ ] 本地 fake Bark 分别验证 Blocking/P1 与 Severe Risk/P0 的完整 payload；真实真机验收至少重跑一条 Blocking/P1 通知，不强制播放真实 P0 Critical 预览。
@@ -15,4 +15,3 @@
 - [ ] 从干净环境可以重复完成安装、私密绑定、AGENTS 授权、新任务验活和真机确认；重新运行激活不会重复写托管块或无意重复发送测试通知。
 - [ ] 最终 MVP 安装物与运行路径不包含用户订阅、订阅功能开关、`UserPromptSubmit`、`SessionStart`、Stop Hook、每轮 `$notify-me check`、PreToolUse 守门或后台常驻进程。
 - [ ] MVP 验收记录明确区分本地合同测试、Bark 服务已接受和用户确认手机可见，且所有自动化测试在干净环境通过。
-
