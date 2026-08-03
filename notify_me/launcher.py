@@ -22,21 +22,17 @@ def _source_package(plugin_root):
     return package
 
 
-def install_stable_launcher(paths, plugin_root):
-    """Atomically install one executable zipapp at the stable private path."""
-
-    package = _source_package(plugin_root)
-    bin_dir = paths.launcher.parent
+def _install_zipapp(paths, package, target):
+    bin_dir = target.parent
     if bin_dir.is_symlink():
         raise NotifyMeError("unsafe_launcher_path", "稳定入口目录不能是符号链接")
     try:
         bin_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(bin_dir, 0o700)
+        if bin_dir == paths.config_dir / "bin":
+            os.chmod(bin_dir, 0o700)
     except OSError as exc:
         raise NotifyMeError("launcher_install_failed", "无法准备 Notify Me 稳定入口") from exc
-    if paths.launcher.is_symlink() or (
-        paths.launcher.exists() and not paths.launcher.is_file()
-    ):
+    if target.is_symlink() or (target.exists() and not target.is_file()):
         raise NotifyMeError("unsafe_launcher_path", "Notify Me 稳定入口路径不安全")
 
     descriptor = None
@@ -53,7 +49,7 @@ def install_stable_launcher(paths, plugin_root):
                     continue
                 archive.write(source, str(Path("notify_me") / source.relative_to(package)))
         os.chmod(temporary, 0o700)
-        os.replace(temporary, paths.launcher)
+        os.replace(temporary, target)
         temporary = None
     except OSError as exc:
         if descriptor is not None:
@@ -66,11 +62,21 @@ def install_stable_launcher(paths, plugin_root):
             except OSError:
                 pass
     try:
-        info = paths.launcher.lstat()
+        info = target.lstat()
     except OSError as exc:
         raise NotifyMeError("launcher_install_failed", "Notify Me 稳定入口安装后不可用") from exc
     if not stat.S_ISREG(info.st_mode) or not info.st_mode & stat.S_IXUSR:
         raise NotifyMeError("launcher_install_failed", "Notify Me 稳定入口安装后不可执行")
+    return target
+
+
+def install_stable_launcher(paths, plugin_root):
+    """Install the primary launcher and refresh the exact legacy path for live tasks."""
+
+    package = _source_package(plugin_root)
+    _install_zipapp(paths, package, paths.launcher)
+    if paths.legacy_launcher != paths.launcher:
+        _install_zipapp(paths, package, paths.legacy_launcher)
     return paths.launcher
 
 

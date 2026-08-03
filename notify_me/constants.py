@@ -24,10 +24,10 @@ LEGACY_MANAGED_BLOCK_V2 = "\n".join(
 )
 
 
-def managed_block(launcher_command):
+def _direct_managed_block(version, launcher_command):
     return "\n".join(
         (
-            "<!-- notify-me:managed:start version=3 -->",
+            "<!-- notify-me:managed:start version={} -->".format(version),
             "仅顶层、直接面向用户的主 Agent 持续判断 Notify Me 内置条件。任务阻塞包括：必须向用户索取缺失信息、亲自授权、实质选择或外部操作，且用户响应前没有可继续的主线工作；严重风险指继续执行可能造成灾难性或大范围不可逆影响。",
             "命中后无需读取 Notify Me Skill，直接以宿主提权模式调用固定入口 {} send --condition-id blocking|severe-risk --item-id <稳定事项标识> --state <稳定语义状态> --action <面向用户的自然语言动作>；授权前缀必须精确限制为该固定入口。固定入口自动读取真实任务标题和项目归属。普通问答、进度、完成、已获授权的常规敏感操作及任何子 Agent、委派 Agent、Ticket Worker 均不得调用。".format(
                 launcher_command
@@ -36,6 +36,14 @@ def managed_block(launcher_command):
             "<!-- notify-me:managed:end -->",
         )
     )
+
+
+def managed_block(launcher_command):
+    return _direct_managed_block(4, launcher_command)
+
+
+def legacy_managed_block_v3(launcher_command):
+    return _direct_managed_block(3, launcher_command)
 
 
 # Compatibility alias for callers that still need to recognize the frozen v2 block.

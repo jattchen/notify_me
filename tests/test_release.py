@@ -106,7 +106,7 @@ class MvpPackageContractTests(unittest.TestCase):
 
         self.assertIn("宿主技能清单提供的精确 `SKILL.md` 路径", skill)
         self.assertIn("不得扫描或猜测其他安装目录和版本号", skill)
-        self.assertIn("稳定运行入口", skill)
+        self.assertIn("稳定入口", skill)
         self.assertIn("无需加载这份 Skill", skill)
         self.assertIn("只执行一次 `send`", skill)
         self.assertIn("不得先执行 `onboarding inspect`", skill)
@@ -169,6 +169,25 @@ class MvpPackageContractTests(unittest.TestCase):
             self.assertEqual(initialized["status"], "unconfigured")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)["status"], "unconfigured")
+
+    def test_launcher_install_preserves_an_existing_shared_bin_mode(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            shared_bin = Path(temp_dir) / ".local" / "bin"
+            shared_bin.mkdir(parents=True, mode=0o755)
+            shared_bin.chmod(0o755)
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "NOTIFY_ME_LAUNCHER_PATH": str(shared_bin / "notify-me"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_PLUGIN_ROOT": str(root),
+            }
+
+            result = run_cli(["onboarding", "initialize"], env=env)
+
+            self.assertEqual(result["status"], "unconfigured")
+            self.assertEqual(shared_bin.stat().st_mode & 0o777, 0o755)
+            self.assertEqual((shared_bin / "notify-me").stat().st_mode & 0o777, 0o700)
 
     def test_skill_and_manifest_describe_both_fixed_conditions_without_hooks(self):
         root = Path(__file__).resolve().parents[1]

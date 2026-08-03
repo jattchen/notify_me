@@ -24,6 +24,9 @@ class AgentsRuleActivationTests(unittest.TestCase):
     def environment(self, temp_dir):
         return {
             "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+            "NOTIFY_ME_LAUNCHER_PATH": str(
+                Path(temp_dir) / ".local" / "bin" / "notify-me"
+            ),
             "CODEX_HOME": str(Path(temp_dir) / "codex"),
             "NOTIFY_ME_TEST_MODE": "1",
             "NOTIFY_ME_TEST_SCOPE": "activation-install-scope",
@@ -78,18 +81,21 @@ class AgentsRuleActivationTests(unittest.TestCase):
             codex_home = Path(env["CODEX_HOME"])
             codex_home.mkdir()
             (codex_home / "AGENTS.md").write_text("user\n", encoding="utf-8")
-            launcher = Path(env["NOTIFY_ME_CONFIG_DIR"]) / "bin" / "notify-me"
+            launcher = resolve_storage_paths(env).launcher
 
             plan = run_cli(["agents-rule", "plan"], env=env)
 
             self.assertTrue(launcher.is_file())
             self.assertTrue(launcher.stat().st_mode & 0o100)
+            self.assertTrue(resolve_storage_paths(env).legacy_launcher.is_file())
+            self.assertNotIn(" ", str(launcher))
             self.assertIn(str(launcher), plan["managed_block"])
+            self.assertIn("version=4", plan["managed_block"])
             self.assertIn("调用固定入口", plan["managed_block"])
             self.assertIn("直接以宿主提权模式", plan["managed_block"])
             self.assertIn("无需读取 Notify Me Skill", plan["managed_block"])
 
-    def test_exact_v1_managed_block_can_be_safely_upgraded_to_v3(self):
+    def test_exact_v1_managed_block_can_be_safely_upgraded_to_v4(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             env = self.environment(temp_dir)
             self.prepare_activation(env)
@@ -117,7 +123,7 @@ class AgentsRuleActivationTests(unittest.TestCase):
                 "user content\n" + self.expected_block(env) + "\n",
             )
 
-    def test_exact_v2_managed_block_can_be_safely_upgraded_to_v3(self):
+    def test_exact_v2_managed_block_can_be_safely_upgraded_to_v4(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             env = self.environment(temp_dir)
             self.prepare_activation(env)
@@ -125,6 +131,38 @@ class AgentsRuleActivationTests(unittest.TestCase):
             codex_home.mkdir()
             agents = codex_home / "AGENTS.md"
             agents.write_text("user content\n" + LEGACY_MANAGED_BLOCK_V2 + "\n", encoding="utf-8")
+
+            plan = run_cli(["agents-rule", "plan"], env=env)
+            committed = run_cli(
+                [
+                    "agents-rule",
+                    "commit",
+                    "--authorize",
+                    "--expected-sha256",
+                    plan["current_sha256"],
+                ],
+                env=env,
+            )
+
+            self.assertEqual(plan["change"], "upgrade")
+            self.assertTrue(committed["changed"])
+            self.assertEqual(
+                agents.read_text(encoding="utf-8"),
+                "user content\n" + self.expected_block(env) + "\n",
+            )
+
+    def test_exact_v3_block_with_legacy_spaced_launcher_upgrades_to_v4(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            self.prepare_activation(env)
+            codex_home = Path(env["CODEX_HOME"])
+            codex_home.mkdir()
+            agents = codex_home / "AGENTS.md"
+            legacy_launcher = Path(env["NOTIFY_ME_CONFIG_DIR"]) / "bin" / "notify-me"
+            legacy = managed_block(shlex.quote(str(legacy_launcher))).replace(
+                "version=4", "version=3", 1
+            )
+            agents.write_text("user content\n" + legacy + "\n", encoding="utf-8")
 
             plan = run_cli(["agents-rule", "plan"], env=env)
             committed = run_cli(
@@ -198,6 +236,7 @@ class AgentsRuleActivationTests(unittest.TestCase):
             self.assertEqual(fake.payloads[-1]["body"], "请提供准确的四位确认码")
             store = StateStore(resolve_storage_paths(env))
             self.assertEqual(store.get_setting("onboarding_state"), "active")
+            self.assertIsNone(store.get_setting("agents_rule_state"))
 
     def test_expected_hash_rejects_a_concurrent_change_and_preserves_user_bytes(self):
         with tempfile.TemporaryDirectory() as temp_dir:

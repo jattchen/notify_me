@@ -77,7 +77,8 @@ def _activation_scope_fingerprint(store, env):
 def _record_rule_install(store, fingerprint):
     if not store.paths.state_db.exists():
         return
-    store.set_setting("agents_rule_state", "restart-required")
+    if store.get_setting("agents_rule_state") is not None:
+        store.delete_setting("agents_rule_state")
     store.set_setting("agents_rule_scope_fingerprint", fingerprint)
     store.set_setting("onboarding_state", "restart-required")
 
@@ -99,7 +100,10 @@ def _verify_rule_activation(store, env, result):
     result["status"] = "active"
     result["restart_required"] = False
     result["task_scope_verified"] = True
-    store.set_setting("onboarding_state", "active")
+    if store.get_setting("onboarding_state") != "active":
+        store.set_setting("onboarding_state", "active")
+    if store.get_setting("agents_rule_state") is not None:
+        store.delete_setting("agents_rule_state")
     return result
 
 

@@ -26,6 +26,7 @@ class StoragePaths:
     state_db: Path
     dotenv: Path
     launcher: Path
+    legacy_launcher: Path
 
 
 def resolve_storage_paths(env=None):
@@ -39,11 +40,23 @@ def resolve_storage_paths(env=None):
         config_dir = Path.home() / "Library" / "Application Support" / "notify-me"
     else:
         config_dir = Path(values.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "notify-me"
+    legacy_launcher = config_dir / "bin" / "notify-me"
+    configured_launcher = values.get("NOTIFY_ME_LAUNCHER_PATH")
+    if configured_launcher:
+        launcher = Path(configured_launcher).expanduser()
+    elif configured:
+        # Explicit config roots are primarily used for isolated installs and tests.
+        launcher = legacy_launcher
+    elif os.name == "nt":
+        launcher = legacy_launcher
+    else:
+        launcher = Path.home() / ".local" / "bin" / "notify-me"
     return StoragePaths(
         config_dir,
         config_dir / "state.sqlite3",
         config_dir / ".env",
-        config_dir / "bin" / "notify-me",
+        launcher,
+        legacy_launcher,
     )
 
 
@@ -215,6 +228,19 @@ class StateStore:
         except sqlite3.Error as exc:
             connection.rollback()
             raise NotifyMeError("state_write_error", "无法写入本地状态") from exc
+        finally:
+            connection.close()
+
+    def delete_setting(self, key):
+        self._require_database()
+        connection = _connect(self.paths.state_db)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("DELETE FROM settings WHERE key = ?", (key,))
+            connection.commit()
+        except sqlite3.Error as exc:
+            connection.rollback()
+            raise NotifyMeError("state_write_error", "无法清理本地状态") from exc
         finally:
             connection.close()
     def database_summary(self):

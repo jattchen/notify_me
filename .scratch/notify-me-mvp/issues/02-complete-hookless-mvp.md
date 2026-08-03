@@ -33,3 +33,7 @@
 性能与标题复验修复：正常通知改为全局 AGENTS v3 直接调用私有目录中的自包含稳定入口，不再读取完整 Skill、搜索版本化插件目录或由 Agent 手工传递标题/项目。运行时按 `CODEX_THREAD_ID` 从 Codex 任务索引读取真实可见标题，并从任务项目映射读取项目根文件夹名；明确无项目时省略后缀，隐私模式完全跳过这些元数据。稳定入口使用精确可复用授权前缀，插件更新时原子刷新。
 
 v3 首次真实阻塞复验发现 `send` 在自动验活之前先要求 `onboarding_state=active`，导致新任务不可能通过第一次直调完成验活并投递。修复后 `send` 先验证托管块与任务作用域，验证成功时原子转为 active，再继续发送；首次安装确认、同任务拒绝、规则漂移和作用域冲突保护保持不变。新增直接首次发送回归测试，全量测试增至 59/59；普通用户不再需要手工运行 `activation verify`。
+
+成功复验日志显示第一次固定入口调用因 macOS `Application Support` 路径含空格且 Agent 漏加引号而失败，造成额外 Shell 调用、Guardian 审核与模型轮次。v4 将 macOS/Linux 主入口迁移到 `~/.local/bin/notify-me`，精确识别旧 v3 块并安全升级；安装器在过渡期同时原子刷新旧入口，保证已启动任务兼容。自动验活后删除未被消费的 `agents_rule_state`，只保留 `onboarding_state` 作为激活事实来源。
+
+Guardian 边界实测：对同一无副作用 `onboarding inspect` 连续两次使用完全相同的 `/Users/mac/.local/bin/notify-me` 精确提权前缀，命令执行分别约 0.004ms 与 13ms，但端到端均约 3 秒，确认剩余时延来自 Codex 宿主自动审核而非 Notify Me。MVP 不引入后台 daemon 或 MCP 常驻工具绕过该安全检查。

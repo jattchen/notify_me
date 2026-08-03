@@ -18,6 +18,7 @@ except ImportError:  # pragma: no cover - the supported MVP hosts provide fcntl.
 from .constants import (
     LEGACY_MANAGED_BLOCK_V1,
     LEGACY_MANAGED_BLOCK_V2,
+    legacy_managed_block_v3,
     managed_block,
 )
 from .errors import NotifyMeError
@@ -31,12 +32,22 @@ _VERSIONED_STARTS = {
     "<!-- notify-me:managed:start version=1 -->",
     "<!-- notify-me:managed:start version=2 -->",
     "<!-- notify-me:managed:start version=3 -->",
+    "<!-- notify-me:managed:start version=4 -->",
 }
 
 
 def _expected_managed_block(env):
     paths = resolve_storage_paths(env)
     return managed_block(shlex.quote(str(paths.launcher)))
+
+
+def _upgradeable_managed_blocks(env):
+    paths = resolve_storage_paths(env)
+    return (
+        LEGACY_MANAGED_BLOCK_V1,
+        LEGACY_MANAGED_BLOCK_V2,
+        legacy_managed_block_v3(shlex.quote(str(paths.legacy_launcher))),
+    )
 
 
 @dataclass(frozen=True)
@@ -118,7 +129,7 @@ def _decode(data):
     return text
 
 
-def _managed_block_info(data, expected_block):
+def _managed_block_info(data, expected_block, upgradeable_blocks):
     text = _decode(data)
     starts = [match.start() for match in re.finditer(re.escape(_START_PREFIX), text)]
     ends = [match.start() for match in re.finditer(re.escape(_END_MARKER), text)]
@@ -145,7 +156,7 @@ def _managed_block_info(data, expected_block):
     normalized = block.replace("\r\n", "\n")
     if normalized == expected_block:
         status = "installed"
-    elif normalized in (LEGACY_MANAGED_BLOCK_V1, LEGACY_MANAGED_BLOCK_V2):
+    elif normalized in upgradeable_blocks:
         status = "upgradeable"
     else:
         status = "drifted"
@@ -177,12 +188,13 @@ def _sha(data):
 def plan_agents_rule(env=None):
     values = os.environ if env is None else env
     expected_block = _expected_managed_block(values)
+    upgradeable_blocks = _upgradeable_managed_blocks(values)
     target = effective_agents(values)
     if target.is_symlink:
         raise NotifyMeError("unsafe_agents_target", "生效的 AGENTS 文件不能是符号链接")
     if target.exists and not target.is_regular:
         raise NotifyMeError("unsafe_agents_target", "生效的 AGENTS 文件不是普通文件")
-    info = _managed_block_info(target.data, expected_block)
+    info = _managed_block_info(target.data, expected_block, upgradeable_blocks)
     if info["status"] == "drifted":
         change = "drifted"
         result_bytes = target.data
@@ -317,6 +329,7 @@ def commit_agents_rule(env=None, authorize=False, expected_sha256=None):
     if not stable_launcher_ready(paths):
         raise NotifyMeError("launcher_not_installed", "请先安装 Notify Me 稳定运行入口")
     expected_block = _expected_managed_block(values)
+    upgradeable_blocks = _upgradeable_managed_blocks(values)
     target = effective_agents(values)
     if target.is_symlink:
         raise NotifyMeError("unsafe_agents_target", "生效的 AGENTS 文件不能是符号链接")
@@ -325,7 +338,7 @@ def commit_agents_rule(env=None, authorize=False, expected_sha256=None):
     current_hash = _sha(target.data)
     if expected_sha256 and expected_sha256 != current_hash:
         raise NotifyMeError("agents_changed", "生效的 AGENTS 文件在授权前发生变化")
-    info = _managed_block_info(target.data, expected_block)
+    info = _managed_block_info(target.data, expected_block, upgradeable_blocks)
     if info["status"] == "drifted":
         raise NotifyMeError("managed_block_drift", "Notify Me 托管块已被修改，拒绝覆盖")
     candidate = _candidate_content(info, expected_block).encode("utf-8")
@@ -371,10 +384,11 @@ def commit_agents_rule(env=None, authorize=False, expected_sha256=None):
 def verify_agents_rule(env=None):
     values = os.environ if env is None else env
     expected_block = _expected_managed_block(values)
+    upgradeable_blocks = _upgradeable_managed_blocks(values)
     target = effective_agents(values)
     if target.is_symlink or (target.exists and not target.is_regular):
         raise NotifyMeError("unsafe_agents_target", "生效的 AGENTS 文件不安全")
-    info = _managed_block_info(target.data, expected_block)
+    info = _managed_block_info(target.data, expected_block, upgradeable_blocks)
     if info["status"] != "installed":
         return {
             "status": "not-installed" if info["status"] == "missing" else info["status"],
