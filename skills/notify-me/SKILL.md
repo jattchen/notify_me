@@ -21,9 +21,9 @@ python3 <notify-me-skill>/scripts/notify_me.py agents-rule plan
 python3 <notify-me-skill>/scripts/notify_me.py agents-rule commit --authorize
 ```
 
-`setup` 的提示是终端私密输入；Bark 完整推送 URL 不得进入对话、命令参数、日志或状态库。`test` 只代表 Bark 服务已接受，只有用户确认手机实际出现测试通知后，才调用 `onboarding confirm`。
+`setup` 的提示是终端私密输入；Bark 完整推送 URL 不得进入对话、命令参数、日志或状态库。`test` 返回“Bark 通知已推送”只代表 Bark 服务接受请求，只有用户确认手机实际出现测试通知后，才调用 `onboarding confirm`。
 
-`onboarding initialize` 会把当前插件运行时复制为自包含、无版本号且不含空格的稳定入口 `~/.local/bin/notify-me`；`agents-rule commit` 把该固定入口写入托管规则。插件更新后可用 `python3 <notify-me-skill>/scripts/notify_me.py runtime install` 原子刷新它。迁移期间安装器也刷新旧的私有配置目录入口，保证仍在运行的旧任务兼容；新任务只使用 `~/.local/bin/notify-me`。正常通知因此无需加载这份 Skill，也不依赖会变化的插件缓存版本路径。
+`onboarding initialize` 会把当前插件运行时复制为自包含、无版本号且不含空格的稳定入口 `~/.local/bin/notify-me`；`agents-rule commit` 把该固定入口写入托管规则。插件更新且托管版本变化时，必须先执行 `python3 <notify-me-skill>/scripts/notify_me.py runtime install` 原子刷新稳定入口，再执行 `agents-rule commit`；不得只更新 AGENTS 托管块。迁移期间安装器也刷新旧的私有配置目录入口，保证仍在运行的旧任务兼容；新任务只使用 `~/.local/bin/notify-me`。正常通知因此无需加载这份 Skill，也不依赖会变化的插件缓存版本路径。
 
 ## 权限与执行结果合同
 
@@ -31,13 +31,15 @@ python3 <notify-me-skill>/scripts/notify_me.py agents-rule commit --authorize
 
 Onboarding 第一次申请这类权限时，应请求一条可复用授权，安装阶段的命令前缀必须精确到当前安装态入口，例如 `python3 <notify-me-skill>/scripts/notify_me.py`；不得申请宽泛的 `python3` 前缀，也不得扩大到其他脚本。托管规则中的 `send` 必须直接使用宿主提权模式，并把可复用授权前缀精确到稳定入口。插件版本变化不会改变这个前缀。
 
+调用 `send` 时必须把工具的 `yield_time_ms` 设为 `30000`，让 Guardian 审核和 Bark 请求尽量在一次工具调用内返回最终 JSON；命令提前完成时立即返回，并不会固定等待 30 秒。
+
 精确前缀用于缩小授权范围和避免重复打扰，不保证跳过 Codex 的内部 Guardian 审核；当前宿主可能仍为每次 `require_escalated` 调用增加数秒审核时延。MVP 不为规避该宿主检查引入常驻进程、宽泛授权或始终加载的 MCP 工具。
 
 插件更新后，已启动任务的 Skill 目录元数据可能继续显示旧缓存版本，直到 Codex 重启；这不影响固定入口通知。只有需要在同一旧任务中重新进入 Onboarding 或诊断时，才提示用户重启 Codex 获取新版 Skill 文档。
 
 每次命令都必须等待进程结束并解析 JSON，遵守以下结果合同：
 
-- 只有 `ok=true` 且 `status=accepted` 时，才可以说“Bark 服务已接受”；这仍不等于手机已显示。
+- 只有 `ok=true` 且 `status=accepted` 时，才可以说“Bark 通知已推送”；这仍不等于手机已显示。
 - `status=deduplicated` 表示没有新发 Bark；`status=suppressed` 表示非主通知者被抑制；`status=failed` 表示服务未接受。三者都不得声称已发送。
 - 任何非零退出、无 JSON 或 `ok=false` 都不得声称已发送，也不得在未说明失败的情况下继续向用户索取信息。
 - 若错误为 `state_write_error` 且 `requires_permission_retry=true`，立即申请上述私有状态写入与 Bark 网络权限，使用完全相同的 `item-id` 和 `state` 重试一次；再次失败则明确报告通知失败及错误码。

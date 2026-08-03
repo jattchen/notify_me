@@ -239,7 +239,7 @@ def send_test(store, endpoint, transport, sleep=None):
             "status": "accepted",
             "category": result.category,
             "attempts": result.attempts,
-            "message": "Bark 服务已接受；手机是否显示仍需由用户确认",
+            "message": "Bark 通知已推送；手机是否显示仍需由用户确认",
             "phone_status": "unverified",
             "payload": _payload_contract_view(payload),
         }
@@ -326,7 +326,7 @@ def send_condition(store, endpoint, transport, condition_id, item_id, state, act
         "priority": CONDITION_PRIORITY[condition_id],
         "category": result.category,
         "attempts": result.attempts,
-        "message": "Bark 服务已接受；手机是否显示仍需由用户确认"
+        "message": "Bark 通知已推送；手机是否显示仍需由用户确认"
         if result.accepted
         else "Bark 服务未接受通知",
     }

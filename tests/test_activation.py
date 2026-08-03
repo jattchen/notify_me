@@ -10,6 +10,9 @@ from notify_me.cli import run_cli
 from notify_me.constants import (
     LEGACY_MANAGED_BLOCK_V1,
     LEGACY_MANAGED_BLOCK_V2,
+    legacy_managed_block_v3,
+    legacy_managed_block_v4,
+    legacy_managed_block_v5_pushed,
     managed_block,
 )
 from notify_me.storage import StateStore, resolve_storage_paths
@@ -90,12 +93,13 @@ class AgentsRuleActivationTests(unittest.TestCase):
             self.assertTrue(resolve_storage_paths(env).legacy_launcher.is_file())
             self.assertNotIn(" ", str(launcher))
             self.assertIn(str(launcher), plan["managed_block"])
-            self.assertIn("version=4", plan["managed_block"])
+            self.assertIn("version=6", plan["managed_block"])
+            self.assertIn("yield_time_ms 设为 30000", plan["managed_block"])
             self.assertIn("调用固定入口", plan["managed_block"])
             self.assertIn("直接以宿主提权模式", plan["managed_block"])
             self.assertIn("无需读取 Notify Me Skill", plan["managed_block"])
 
-    def test_exact_v1_managed_block_can_be_safely_upgraded_to_v4(self):
+    def test_exact_v1_managed_block_can_be_safely_upgraded_to_v6(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             env = self.environment(temp_dir)
             self.prepare_activation(env)
@@ -123,7 +127,7 @@ class AgentsRuleActivationTests(unittest.TestCase):
                 "user content\n" + self.expected_block(env) + "\n",
             )
 
-    def test_exact_v2_managed_block_can_be_safely_upgraded_to_v4(self):
+    def test_exact_v2_managed_block_can_be_safely_upgraded_to_v6(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             env = self.environment(temp_dir)
             self.prepare_activation(env)
@@ -151,7 +155,7 @@ class AgentsRuleActivationTests(unittest.TestCase):
                 "user content\n" + self.expected_block(env) + "\n",
             )
 
-    def test_exact_v3_block_with_legacy_spaced_launcher_upgrades_to_v4(self):
+    def test_exact_v3_block_with_legacy_spaced_launcher_upgrades_to_v6(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             env = self.environment(temp_dir)
             self.prepare_activation(env)
@@ -159,9 +163,7 @@ class AgentsRuleActivationTests(unittest.TestCase):
             codex_home.mkdir()
             agents = codex_home / "AGENTS.md"
             legacy_launcher = Path(env["NOTIFY_ME_CONFIG_DIR"]) / "bin" / "notify-me"
-            legacy = managed_block(shlex.quote(str(legacy_launcher))).replace(
-                "version=4", "version=3", 1
-            )
+            legacy = legacy_managed_block_v3(shlex.quote(str(legacy_launcher)))
             agents.write_text("user content\n" + legacy + "\n", encoding="utf-8")
 
             plan = run_cli(["agents-rule", "plan"], env=env)
@@ -182,6 +184,52 @@ class AgentsRuleActivationTests(unittest.TestCase):
                 agents.read_text(encoding="utf-8"),
                 "user content\n" + self.expected_block(env) + "\n",
             )
+
+    def test_exact_v4_block_upgrades_to_v6_with_long_single_wait(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            self.prepare_activation(env)
+            codex_home = Path(env["CODEX_HOME"])
+            codex_home.mkdir()
+            agents = codex_home / "AGENTS.md"
+            launcher = resolve_storage_paths(env).launcher
+            legacy = legacy_managed_block_v4(shlex.quote(str(launcher)))
+            agents.write_text("user content\n" + legacy + "\n", encoding="utf-8")
+
+            plan = run_cli(["agents-rule", "plan"], env=env)
+            committed = run_cli(
+                [
+                    "agents-rule",
+                    "commit",
+                    "--authorize",
+                    "--expected-sha256",
+                    plan["current_sha256"],
+                ],
+                env=env,
+            )
+
+            self.assertEqual(plan["change"], "upgrade")
+            self.assertTrue(committed["changed"])
+            content = agents.read_text(encoding="utf-8")
+            self.assertIn("version=6", content)
+            self.assertIn("yield_time_ms 设为 30000", content)
+
+    def test_pushed_wording_v5_block_is_safely_upgraded(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            self.prepare_activation(env)
+            codex_home = Path(env["CODEX_HOME"])
+            codex_home.mkdir()
+            agents = codex_home / "AGENTS.md"
+            launcher = resolve_storage_paths(env).launcher
+            legacy = legacy_managed_block_v5_pushed(shlex.quote(str(launcher)))
+            agents.write_text("user content\n" + legacy + "\n", encoding="utf-8")
+
+            plan = run_cli(["agents-rule", "plan"], env=env)
+
+            self.assertEqual(plan["change"], "upgrade")
+            self.assertIn("version=6", plan["managed_block"])
+            self.assertIn("Bark 通知已推送", plan["managed_block"])
 
     def test_rule_install_reports_restart_until_a_new_task_verifies_it(self):
         with tempfile.TemporaryDirectory() as temp_dir:

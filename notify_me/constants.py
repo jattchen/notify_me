@@ -24,26 +24,64 @@ LEGACY_MANAGED_BLOCK_V2 = "\n".join(
 )
 
 
-def _direct_managed_block(version, launcher_command):
-    return "\n".join(
+def _direct_managed_block(
+    version,
+    launcher_command,
+    yield_time_ms=None,
+    accepted_wording="Bark 服务已接受",
+):
+    lines = [
+        "<!-- notify-me:managed:start version={} -->".format(version),
+        "仅顶层、直接面向用户的主 Agent 持续判断 Notify Me 内置条件。任务阻塞包括：必须向用户索取缺失信息、亲自授权、实质选择或外部操作，且用户响应前没有可继续的主线工作；严重风险指继续执行可能造成灾难性或大范围不可逆影响。",
+        "命中后无需读取 Notify Me Skill，直接以宿主提权模式调用固定入口 {} send --condition-id blocking|severe-risk --item-id <稳定事项标识> --state <稳定语义状态> --action <面向用户的自然语言动作>；授权前缀必须精确限制为该固定入口。固定入口自动读取真实任务标题和项目归属。普通问答、进度、完成、已获授权的常规敏感操作及任何子 Agent、委派 Agent、Ticket Worker 均不得调用。".format(
+            launcher_command
+        ),
+    ]
+    if yield_time_ms is not None:
+        lines.append(
+            "调用工具时将 yield_time_ms 设为 {}，等待命令一次性返回最终 JSON。".format(
+                yield_time_ms
+            )
+        )
+    lines.extend(
         (
-            "<!-- notify-me:managed:start version={} -->".format(version),
-            "仅顶层、直接面向用户的主 Agent 持续判断 Notify Me 内置条件。任务阻塞包括：必须向用户索取缺失信息、亲自授权、实质选择或外部操作，且用户响应前没有可继续的主线工作；严重风险指继续执行可能造成灾难性或大范围不可逆影响。",
-            "命中后无需读取 Notify Me Skill，直接以宿主提权模式调用固定入口 {} send --condition-id blocking|severe-risk --item-id <稳定事项标识> --state <稳定语义状态> --action <面向用户的自然语言动作>；授权前缀必须精确限制为该固定入口。固定入口自动读取真实任务标题和项目归属。普通问答、进度、完成、已获授权的常规敏感操作及任何子 Agent、委派 Agent、Ticket Worker 均不得调用。".format(
-                launcher_command
+            "只有返回 ok=true 且 status=accepted 时才可说 {}；其他结果必须如实说明，不能声称已发送。".format(
+                accepted_wording
             ),
-            "只有返回 ok=true 且 status=accepted 时才可说 Bark 服务已接受；其他结果必须如实说明，不能声称已发送。",
             "<!-- notify-me:managed:end -->",
         )
     )
+    return "\n".join(lines)
 
 
 def managed_block(launcher_command):
-    return _direct_managed_block(4, launcher_command)
+    return _direct_managed_block(
+        6,
+        launcher_command,
+        yield_time_ms=30000,
+        accepted_wording="Bark 通知已推送",
+    )
 
 
 def legacy_managed_block_v3(launcher_command):
     return _direct_managed_block(3, launcher_command)
+
+
+def legacy_managed_block_v4(launcher_command):
+    return _direct_managed_block(4, launcher_command)
+
+
+def legacy_managed_block_v5(launcher_command):
+    return _direct_managed_block(5, launcher_command, yield_time_ms=30000)
+
+
+def legacy_managed_block_v5_pushed(launcher_command):
+    return _direct_managed_block(
+        5,
+        launcher_command,
+        yield_time_ms=30000,
+        accepted_wording="Bark 通知已推送",
+    )
 
 
 # Compatibility alias for callers that still need to recognize the frozen v2 block.

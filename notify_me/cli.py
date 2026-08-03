@@ -179,7 +179,7 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
                 raise NotifyMeError("invalid_arguments", "confirm 不接受参数")
             store.require_initialized()
             if store.get_setting("onboarding_state") != "server-accepted":
-                raise NotifyMeError("test_not_accepted", "请先完成 P1 测试并确认 Bark 服务已接受")
+                raise NotifyMeError("test_not_accepted", "请先完成 P1 测试并确认 Bark 通知已推送")
             store.set_setting("onboarding_state", "test-confirmed")
             return {
                 "ok": True,

@@ -162,10 +162,11 @@ Onboarding 最终拟写入当前 `CODEX_HOME` 中实际生效的全局 AGENTS �
 规则使用带版本的托管块，避免重复和误删用户内容：
 
 ```md
-<!-- notify-me:managed:start version=4 -->
+<!-- notify-me:managed:start version=6 -->
 仅顶层、直接面向用户的主 Agent 持续判断 Notify Me 内置条件。任务阻塞包括：必须向用户索取缺失信息、亲自授权、实质选择或外部操作，且用户响应前没有可继续的主线工作；严重风险指继续执行可能造成灾难性或大范围不可逆影响。
 命中后无需读取 Notify Me Skill，直接以宿主提权模式调用固定入口 <stable-launcher> send --condition-id blocking|severe-risk --item-id <稳定事项标识> --state <稳定语义状态> --action <面向用户的自然语言动作>；授权前缀必须精确限制为该固定入口。固定入口自动读取真实任务标题和项目归属。普通问答、进度、完成、已获授权的常规敏感操作及任何子 Agent、委派 Agent、Ticket Worker 均不得调用。
-只有返回 ok=true 且 status=accepted 时才可说 Bark 服务已接受；其他结果必须如实说明，不能声称已发送。
+调用工具时将 yield_time_ms 设为 30000，等待命令一次性返回最终 JSON。
+只有返回 ok=true 且 status=accepted 时才可说 Bark 通知已推送；其他结果必须如实说明，不能声称已发送。
 <!-- notify-me:managed:end -->
 ```
 
@@ -175,7 +176,9 @@ Onboarding 最终拟写入当前 `CODEX_HOME` 中实际生效的全局 AGENTS �
 
 Codex 初始上下文只获得 Skill 的名称与描述，只有显式调用或模型判断请求匹配时才读取完整 `SKILL.md`。因此全局规则不得包含 `$notify-me`、`$notify-me check` 或“每轮调用”字样；这些写法会把 Notify Me 变成显式激活候选，破坏渐进式披露。
 
-全局规则只提供足够短的语义判断标准和一个无版本号的稳定运行入口。主 Agent 判断内置条件命中后，直接执行该入口的 `send`，不读取完整 Skill；只有首次配置、配置错误或诊断时才加载 Skill。macOS/Linux 默认入口为不含空格的 `~/.local/bin/notify-me`，避免模型重新组装 Shell 命令时发生路径分词；Windows 使用私有配置目录入口。稳定入口由 Onboarding 从当前插件原子安装，插件更新时原子刷新，避免版本化缓存路径搜索和重复授权。迁移 v3 时同时刷新旧入口供已启动任务兼容，但 v4 托管规则和所有新任务只使用新入口。
+全局规则只提供足够短的语义判断标准和一个无版本号的稳定运行入口。主 Agent 判断内置条件命中后，直接执行该入口的 `send`，不读取完整 Skill；只有首次配置、配置错误或诊断时才加载 Skill。macOS/Linux 默认入口为不含空格的 `~/.local/bin/notify-me`，避免模型重新组装 Shell 命令时发生路径分词；Windows 使用私有配置目录入口。稳定入口由 Onboarding 从当前插件原子安装，插件更新时原子刷新，避免版本化缓存路径搜索和重复授权。迁移 v3 时同时刷新旧入口供已启动任务兼容，但 v4 及之后的托管规则和所有新任务只使用新入口。v5 进一步要求工具调用等待最多 30 秒，以覆盖 Guardian 审核和 Bark 请求，避免中途返回后额外调用 `wait`；v6 将成功文案统一为“Bark 通知已推送”，同时继续明确手机展示状态未经验证。
+
+任何托管版本升级都必须先从新安装态执行 `runtime install`，确认稳定入口能够解析新旧托管版本后，才允许提交新的 AGENTS 托管块。发布验收必须分别从插件缓存入口和稳定入口执行 `agents-rule plan`，两者结果一致才算完成；这防止插件缓存、全局规则和自包含稳定入口出现版本错位。
 
 ### 4.3 条件式双 Hook
 
@@ -370,7 +373,7 @@ macOS/Linux 目录权限 0700，文件 0600；Windows 使用当前用户 ACL 尽
 17. 用户启动一个新的顶层任务；首次 `send` 在投递前自动验证当前生效指令来源、托管块版本和任务作用域并进入 `active`。`activation verify` 只作为可选的提前验收或诊断入口，不要求普通用户手工运行。
 18. 用一句话确认绑定完成，并明确当前是“双 Hook 持久订阅恢复”还是“无 Hook 降级”模式。
 
-所有通知命令必须等待退出并解析 JSON。只有 `ok=true, status=accepted` 才能表述为“Bark 服务已接受”；`deduplicated`、`suppressed`、`failed`、非零退出、无 JSON 或 `ok=false` 均不得声称已发送。`state_write_error` 且返回 `requires_permission_retry=true` 时，使用完全相同的事项与状态在窄授权下重试一次；再次失败则明确报告，不得静默继续。
+所有通知命令必须等待退出并解析 JSON。只有 `ok=true, status=accepted` 才能表述为“Bark 通知已推送”；`deduplicated`、`suppressed`、`failed`、非零退出、无 JSON 或 `ok=false` 均不得声称已发送。该表述仍只代表 Bark 服务接受请求，不证明手机已经展示。`state_write_error` 且返回 `requires_permission_retry=true` 时，使用完全相同的事项与状态在窄授权下重试一次；再次失败则明确报告，不得静默继续。
 
 ### 7.4 AGENTS.md 写入安全
 
