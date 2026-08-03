@@ -237,11 +237,11 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
         ):
             return {"ok": True, "status": "suppressed", "reason": "not_primary_notifier"}
         store.require_initialized()
-        if store.get_setting("onboarding_state") != "active":
-            raise NotifyMeError("activation_required", "请完成用户确认和新任务验活后再发送通知")
         rule = _verify_rule_activation(store, env, verify_agents_rule(env))
         if rule.get("status") != "active":
             raise NotifyMeError("activation_required", "托管规则未在当前任务中生效")
+        if store.get_setting("onboarding_state") != "active":
+            raise NotifyMeError("activation_required", "请完成用户确认和新任务验活后再发送通知")
         endpoint = load_endpoint(paths)
         condition_id = _required(options, "condition-id")
         item_id = _required(options, "item-id")

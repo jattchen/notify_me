@@ -343,7 +343,7 @@ macOS/Linux 目录权限 0700，文件 0600；Windows 使用当前用户 ACL 尽
 | `agents-rule-installed` | 托管块已写入实际生效文件并逐字节验证 | 配置并审查双 Hook |
 | `hook-trust-pending` | 双 Hook 尚未审查/信任 | 引导用户审查两个窄 Hook，或选择无 Hook 降级 |
 | `restart-required` | 当前任务仍使用启动时读取的旧指令链 | 启动一个新顶层任务 |
-| `verification-pending` | 新任务已启动但激活合同尚未验证 | 显式运行一次 activation verify |
+| `verification-pending` | 新任务已启动但激活合同尚未验证 | 首次 `send` 自动验活，或按需显式运行 `activation verify` 诊断 |
 | `active` | 新任务确认规则、配置和所选订阅恢复模式均生效 | 正常使用 |
 | `degraded` | 配置存在但规则漂移、文件权限或状态库异常 | 指向一个当前修复动作 |
 
@@ -367,7 +367,7 @@ macOS/Linux 目录权限 0700，文件 0600；Windows 使用当前用户 ACL 尽
 14. 获得产品层和必要的平台授权后，仅执行一次 `agents-rule commit` 原子写入；随后只做逐字节 verify，不重复写入。
 15. 展示两个订阅恢复 Hook 的精确定义和行为；引导用户在 `/hooks` 中审查并信任，或明确选择“不要 Hook，订阅仅当前上下文 best-effort”。
 16. 运行 `doctor`；若当前任务在写入前已启动，状态进入 `restart-required`，明确说明当前任务不会热加载新 AGENTS 指令。
-17. 用户启动一个新的顶层任务并显式调用一次 activation verify；验证当前生效指令来源、托管块版本和 Hook/降级模式后进入 `active`。
+17. 用户启动一个新的顶层任务；首次 `send` 在投递前自动验证当前生效指令来源、托管块版本和任务作用域并进入 `active`。`activation verify` 只作为可选的提前验收或诊断入口，不要求普通用户手工运行。
 18. 用一句话确认绑定完成，并明确当前是“双 Hook 持久订阅恢复”还是“无 Hook 降级”模式。
 
 所有通知命令必须等待退出并解析 JSON。只有 `ok=true, status=accepted` 才能表述为“Bark 服务已接受”；`deduplicated`、`suppressed`、`failed`、非零退出、无 JSON 或 `ok=false` 均不得声称已发送。`state_write_error` 且返回 `requires_permission_retry=true` 时，使用完全相同的事项与状态在窄授权下重试一次；再次失败则明确报告，不得静默继续。
@@ -385,7 +385,7 @@ macOS/Linux 目录权限 0700，文件 0600；Windows 使用当前用户 ACL 尽
 - 使用同目录临时文件、fsync 和原子替换；失败恢复原文件。
 - 保存托管块版本和内容哈希，不保存整份 AGENTS.md 副本。
 - 卸载或解绑只移除精确匹配的托管块；块被用户修改时先请求确认。
-- 指令链在 run/session 启动时读取一次；写入成功只进入 `restart-required`，不能宣称当前任务已激活。只有新顶层任务验证后才能进入 `active`。
+- 指令链在 run/session 启动时读取一次；写入成功只进入 `restart-required`，不能宣称当前任务已激活。只有新顶层任务通过首次 `send` 的自动验活或显式诊断验活后才能进入 `active`。
 
 ## 8. 事件、去重与升级
 

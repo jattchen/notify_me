@@ -166,6 +166,39 @@ class AgentsRuleActivationTests(unittest.TestCase):
             self.assertEqual(new_task["status"], "active")
             self.assertFalse(new_task["restart_required"])
 
+    def test_first_send_in_a_new_task_automatically_completes_activation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            fake = FakeBarkTransport()
+            self.prepare_activation(env)
+            Path(env["CODEX_HOME"]).mkdir()
+            agents = Path(env["CODEX_HOME"]) / "AGENTS.md"
+            agents.write_text("user content\n", encoding="utf-8")
+            run_cli(["agents-rule", "commit", "--yes"], env=env)
+            env["NOTIFY_ME_TEST_SCOPE"] = "activation-new-task-direct-send"
+
+            result = run_cli(
+                [
+                    "send",
+                    "--condition-id",
+                    "blocking",
+                    "--item-id",
+                    "first-new-task-blocking-item",
+                    "--state",
+                    "waiting-for-user-input",
+                    "--action",
+                    "请提供准确的四位确认码",
+                ],
+                env=env,
+                transport=fake,
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["status"], "accepted")
+            self.assertEqual(fake.payloads[-1]["body"], "请提供准确的四位确认码")
+            store = StateStore(resolve_storage_paths(env))
+            self.assertEqual(store.get_setting("onboarding_state"), "active")
+
     def test_expected_hash_rejects_a_concurrent_change_and_preserves_user_bytes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             env = self.environment(temp_dir)
