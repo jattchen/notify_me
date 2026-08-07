@@ -170,6 +170,65 @@ class MvpPackageContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)["status"], "unconfigured")
 
+    def test_skill_wrapper_ignores_an_inherited_launcher_source(self):
+        root = Path(__file__).resolve().parents[1]
+        wrapper = root / "skills" / "notify-me" / "scripts" / "notify_me.py"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            attacker_root = temp / "attacker"
+            attacker_package = attacker_root / "notify_me"
+            attacker_package.mkdir(parents=True)
+            (attacker_package / "__init__.py").write_text("", encoding="utf-8")
+            (attacker_package / "cli.py").write_text(
+                "from pathlib import Path\n"
+                "def main():\n"
+                f"    Path({str(temp / 'executed')!r}).write_text('attacker')\n"
+                "    return 0\n",
+                encoding="utf-8",
+            )
+            config_dir = temp / "private"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "NOTIFY_ME_CONFIG_DIR": str(config_dir),
+                    "CODEX_HOME": str(temp / "codex"),
+                    "NOTIFY_ME_PLUGIN_ROOT": str(attacker_root),
+                }
+            )
+
+            initialized = subprocess.run(
+                [sys.executable, str(wrapper), "onboarding", "initialize"],
+                cwd=temp_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            installed = subprocess.run(
+                [sys.executable, str(wrapper), "runtime", "install"],
+                cwd=temp_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            launcher = config_dir / "bin" / "notify-me"
+            inspected = subprocess.run(
+                [str(launcher), "onboarding", "inspect"],
+                cwd=temp_dir,
+                env={**env, "PYTHONPATH": ""},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            self.assertEqual(installed.returncode, 0, installed.stderr)
+            self.assertEqual(json.loads(installed.stdout)["status"], "installed")
+            self.assertEqual(inspected.returncode, 0, inspected.stderr)
+            self.assertEqual(json.loads(inspected.stdout)["status"], "unconfigured")
+            self.assertFalse((temp / "executed").exists())
+
     def test_launcher_install_preserves_an_existing_shared_bin_mode(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -10,19 +10,91 @@ from .errors import NotifyMeError
 
 
 _MAIN = b"from notify_me.cli import main\nraise SystemExit(main())\n"
+_PACKAGE_SOURCES = (
+    "__init__.py",
+    "activation.py",
+    "cli.py",
+    "constants.py",
+    "errors.py",
+    "launcher.py",
+    "runtime.py",
+    "storage.py",
+    "task_context.py",
+    "transport.py",
+)
 
 
-def _source_package(plugin_root):
-    if not isinstance(plugin_root, str) or not plugin_root:
-        raise NotifyMeError("launcher_source_unavailable", "无法定位 Notify Me 运行时来源")
-    root = Path(plugin_root).expanduser()
-    package = root / "notify_me"
-    if root.is_symlink() or package.is_symlink() or not package.is_dir():
+def _reject_source_symlinks(path):
+    for component in (path, *path.parents):
+        try:
+            info = component.lstat()
+        except OSError as exc:
+            raise NotifyMeError(
+                "launcher_source_unavailable", "无法定位 Notify Me 运行时来源"
+            ) from exc
+        if stat.S_ISLNK(info.st_mode):
+            raise NotifyMeError("launcher_source_unavailable", "Notify Me 运行时来源不安全")
+
+
+def _read_source(path):
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = None
+    try:
+        descriptor = os.open(path, flags)
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            raise NotifyMeError(
+                "launcher_source_unavailable", "Notify Me 运行时来源不安全"
+            )
+        with os.fdopen(descriptor, "rb") as handle:
+            descriptor = None
+            return handle.read()
+    except NotifyMeError:
+        raise
+    except OSError as exc:
+        raise NotifyMeError(
+            "launcher_source_unavailable", "无法读取 Notify Me 运行时来源"
+        ) from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _source_bundle():
+    module = Path(os.path.abspath(__file__))
+    package = module.parent
+    _reject_source_symlinks(module)
+    if (
+        module.name != "launcher.py"
+        or package.name != "notify_me"
+        or not package.is_dir()
+    ):
         raise NotifyMeError("launcher_source_unavailable", "Notify Me 运行时来源不安全")
-    return package
+
+    try:
+        discovered = {
+            source.relative_to(package).as_posix()
+            for source in package.rglob("*.py")
+            if "__pycache__" not in source.parts
+        }
+    except (OSError, ValueError) as exc:
+        raise NotifyMeError(
+            "launcher_source_unavailable", "无法检查 Notify Me 运行时来源"
+        ) from exc
+    if discovered != set(_PACKAGE_SOURCES):
+        raise NotifyMeError("launcher_source_unavailable", "Notify Me 运行时文件清单不匹配")
+
+    bundle = []
+    for relative in _PACKAGE_SOURCES:
+        source = package / relative
+        _reject_source_symlinks(source)
+        bundle.append((relative, _read_source(source)))
+    return tuple(bundle)
 
 
-def _install_zipapp(paths, package, target):
+def _install_zipapp(paths, bundle, target):
     bin_dir = target.parent
     if bin_dir.is_symlink():
         raise NotifyMeError("unsafe_launcher_path", "稳定入口目录不能是符号链接")
@@ -44,10 +116,8 @@ def _install_zipapp(paths, package, target):
             handle.write(b"#!/usr/bin/env python3\n")
         with zipfile.ZipFile(temporary, "a", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("__main__.py", _MAIN)
-            for source in sorted(package.rglob("*.py")):
-                if "__pycache__" in source.parts or source.is_symlink():
-                    continue
-                archive.write(source, str(Path("notify_me") / source.relative_to(package)))
+            for relative, source in bundle:
+                archive.writestr(str(Path("notify_me") / relative), source)
         os.chmod(temporary, 0o700)
         os.replace(temporary, target)
         temporary = None
@@ -70,13 +140,13 @@ def _install_zipapp(paths, package, target):
     return target
 
 
-def install_stable_launcher(paths, plugin_root):
+def install_stable_launcher(paths):
     """Install the primary launcher and refresh the exact legacy path for live tasks."""
 
-    package = _source_package(plugin_root)
-    _install_zipapp(paths, package, paths.launcher)
+    bundle = _source_bundle()
+    _install_zipapp(paths, bundle, paths.launcher)
     if paths.legacy_launcher != paths.launcher:
-        _install_zipapp(paths, package, paths.legacy_launcher)
+        _install_zipapp(paths, bundle, paths.legacy_launcher)
     return paths.launcher
 
 

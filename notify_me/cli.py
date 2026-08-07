@@ -189,9 +189,7 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
         if len(argv) != 2:
             raise NotifyMeError("invalid_arguments", "initialize 不接受参数")
         store.initialize()
-        plugin_root = env.get("NOTIFY_ME_PLUGIN_ROOT")
-        if plugin_root:
-            install_stable_launcher(paths, plugin_root)
+        install_stable_launcher(paths)
         return {
             "ok": True,
             "status": "unconfigured",
@@ -276,9 +274,7 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
         if len(argv) != 2 or argv[1] != "install":
             raise NotifyMeError("unsupported_command", "当前 MVP 命令不可用")
         store.require_initialized()
-        launcher = install_stable_launcher(
-            paths, _required({"plugin-root": env.get("NOTIFY_ME_PLUGIN_ROOT")}, "plugin-root")
-        )
+        launcher = install_stable_launcher(paths)
         return {
             "ok": True,
             "status": "installed",
