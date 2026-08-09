@@ -93,7 +93,7 @@ class AgentsRuleActivationTests(unittest.TestCase):
             self.assertTrue(resolve_storage_paths(env).legacy_launcher.is_file())
             self.assertNotIn(" ", str(launcher))
             self.assertIn(str(launcher), plan["managed_block"])
-            self.assertIn("version=6", plan["managed_block"])
+            self.assertIn("version=7", plan["managed_block"])
             self.assertIn("yield_time_ms 设为 30000", plan["managed_block"])
             self.assertIn("调用固定入口", plan["managed_block"])
             self.assertIn("直接以宿主提权模式", plan["managed_block"])
@@ -211,7 +211,7 @@ class AgentsRuleActivationTests(unittest.TestCase):
             self.assertEqual(plan["change"], "upgrade")
             self.assertTrue(committed["changed"])
             content = agents.read_text(encoding="utf-8")
-            self.assertIn("version=6", content)
+            self.assertIn("version=7", content)
             self.assertIn("yield_time_ms 设为 30000", content)
 
     def test_pushed_wording_v5_block_is_safely_upgraded(self):
@@ -228,7 +228,7 @@ class AgentsRuleActivationTests(unittest.TestCase):
             plan = run_cli(["agents-rule", "plan"], env=env)
 
             self.assertEqual(plan["change"], "upgrade")
-            self.assertIn("version=6", plan["managed_block"])
+            self.assertIn("version=7", plan["managed_block"])
             self.assertIn("Bark 通知已推送", plan["managed_block"])
 
     def test_rule_install_reports_restart_until_a_new_task_verifies_it(self):

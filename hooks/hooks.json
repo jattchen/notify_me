@@ -1,0 +1,30 @@
+{
+  "description": "Notify Me：仅恢复当前顶层任务的有效用户订阅上下文。",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/skills/notify-me/scripts/notify_me.py\" hook user-prompt",
+            "commandWindows": "py -3 \"%PLUGIN_ROOT%\\skills\\notify-me\\scripts\\notify_me.py\" hook user-prompt",
+            "timeout": 0.75
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "^compact$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/skills/notify-me/scripts/notify_me.py\" hook session-start",
+            "commandWindows": "py -3 \"%PLUGIN_ROOT%\\skills\\notify-me\\scripts\\notify_me.py\" hook session-start",
+            "timeout": 0.75
+          }
+        ]
+      }
+    ]
+  }
+}

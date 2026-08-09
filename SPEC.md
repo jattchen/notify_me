@@ -1,7 +1,7 @@
 # Notify Me 初版 Spec
 
-- 状态：Draft 0.3，待剩余产品项逐项过会
-- 日期：2026-08-02
+- 状态：Draft 0.4，MVP 已完成；用户订阅与优先级配置进入实现
+- 日期：2026-08-08
 - 目标版本：Notify Me 0.1.0
 - 来源基线：Bark Push 当前工作树 0.5.2（含未提交变更）
 - 当前阶段：需求对齐；不创建 Ticket，不开始实现
@@ -162,11 +162,11 @@ Onboarding 最终拟写入当前 `CODEX_HOME` 中实际生效的全局 AGENTS �
 规则使用带版本的托管块，避免重复和误删用户内容：
 
 ```md
-<!-- notify-me:managed:start version=6 -->
+<!-- notify-me:managed:start version=7 -->
 仅顶层、直接面向用户的主 Agent 持续判断 Notify Me 内置条件。任务阻塞包括：必须向用户索取缺失信息、亲自授权、实质选择或外部操作，且用户响应前没有可继续的主线工作；严重风险指继续执行可能造成灾难性或大范围不可逆影响。
-命中后无需读取 Notify Me Skill，直接以宿主提权模式调用固定入口 <stable-launcher> send --condition-id blocking|severe-risk --item-id <稳定事项标识> --state <稳定语义状态> --action <面向用户的自然语言动作>；授权前缀必须精确限制为该固定入口。固定入口自动读取真实任务标题和项目归属。普通问答、进度、完成、已获授权的常规敏感操作及任何子 Agent、委派 Agent、Ticket Worker 均不得调用。
+命中内置条件后无需读取 Notify Me Skill，直接以宿主提权模式调用固定入口 <stable-launcher> send --condition-id blocking|severe-risk --item-id <稳定事项标识> --state <稳定语义状态> --action <面向用户的自然语言动作>。有效用户订阅由恢复 Hook 注入；订阅条件满足时直接调用 <stable-launcher> subscription trigger --subscription-id <订阅标识> --fulfillment-id <稳定满足事件标识>。授权前缀必须精确限制为该固定入口。固定入口自动读取真实任务标题和项目归属。普通问答、进度、完成（除非命中用户订阅）、已获授权的常规敏感操作及任何子 Agent、委派 Agent、Ticket Worker 均不得调用。
 调用工具时将 yield_time_ms 设为 30000，等待命令一次性返回最终 JSON。
-只有返回 ok=true 且 status=accepted 时才可说 Bark 通知已推送；其他结果必须如实说明，不能声称已发送。
+只有返回 ok=true 且 status=accepted 时才可说 Bark 通知已推送；deduplicated、suppressed、failed 或任何错误都不得声称已发送。
 <!-- notify-me:managed:end -->
 ```
 
@@ -176,7 +176,7 @@ Onboarding 最终拟写入当前 `CODEX_HOME` 中实际生效的全局 AGENTS �
 
 Codex 初始上下文只获得 Skill 的名称与描述，只有显式调用或模型判断请求匹配时才读取完整 `SKILL.md`。因此全局规则不得包含 `$notify-me`、`$notify-me check` 或“每轮调用”字样；这些写法会把 Notify Me 变成显式激活候选，破坏渐进式披露。
 
-全局规则只提供足够短的语义判断标准和一个无版本号的稳定运行入口。主 Agent 判断内置条件命中后，直接执行该入口的 `send`，不读取完整 Skill；只有首次配置、配置错误或诊断时才加载 Skill。macOS/Linux 默认入口为不含空格的 `~/.local/bin/notify-me`，避免模型重新组装 Shell 命令时发生路径分词；Windows 使用私有配置目录入口。稳定入口由 Onboarding 从当前插件原子安装，插件更新时原子刷新，避免版本化缓存路径搜索和重复授权。迁移 v3 时同时刷新旧入口供已启动任务兼容，但 v4 及之后的托管规则和所有新任务只使用新入口。v5 进一步要求工具调用等待最多 30 秒，以覆盖 Guardian 审核和 Bark 请求，避免中途返回后额外调用 `wait`；v6 将成功文案统一为“Bark 通知已推送”，同时继续明确手机展示状态未经验证。
+全局规则只提供足够短的语义判断标准和一个无版本号的稳定运行入口。主 Agent 判断内置条件命中后，直接执行该入口的 `send`；恢复上下文中的用户订阅满足时，直接执行同一入口的 `subscription trigger`，两条快路径都不读取完整 Skill。只有首次配置、配置错误或诊断时才加载 Skill。macOS/Linux 默认入口为不含空格的 `~/.local/bin/notify-me`，避免模型重新组装 Shell 命令时发生路径分词；Windows 使用私有配置目录入口。稳定入口由 Onboarding 从当前插件原子安装，插件更新时原子刷新，避免版本化缓存路径搜索和重复授权。迁移 v3 时同时刷新旧入口供已启动任务兼容，但 v4 及之后的托管规则和所有新任务只使用新入口。v5 进一步要求工具调用等待最多 30 秒；v6 将成功文案统一为“Bark 通知已推送”；v7 增加用户订阅触发快路径并继续明确手机展示状态未经验证。
 
 任何托管版本升级都必须先从新安装态执行 `runtime install`，确认稳定入口能够解析新旧托管版本后，才允许提交新的 AGENTS 托管块。发布验收必须分别从插件缓存入口和稳定入口执行 `agents-rule plan`，两者结果一致才算完成；这防止插件缓存、全局规则和自包含稳定入口出现版本错位。
 
@@ -373,7 +373,7 @@ macOS/Linux 目录权限 0700，文件 0600；Windows 使用当前用户 ACL 尽
 17. 用户启动一个新的顶层任务；首次 `send` 在投递前自动验证当前生效指令来源、托管块版本和任务作用域并进入 `active`。`activation verify` 只作为可选的提前验收或诊断入口，不要求普通用户手工运行。
 18. 用一句话确认绑定完成，并明确当前是“双 Hook 持久订阅恢复”还是“无 Hook 降级”模式。
 
-所有通知命令必须等待退出并解析 JSON。只有 `ok=true, status=accepted` 才能表述为“Bark 通知已推送”；`deduplicated`、`suppressed`、`failed`、非零退出、无 JSON 或 `ok=false` 均不得声称已发送。该表述仍只代表 Bark 服务接受请求，不证明手机已经展示。`state_write_error` 且返回 `requires_permission_retry=true` 时，使用完全相同的事项与状态在窄授权下重试一次；再次失败则明确报告，不得静默继续。
+所有通知命令必须等待退出并解析 JSON。只有 `ok=true, status=accepted` 才能表述为“Bark 通知已推送”；`queued`（仅进入本地 outbox）、`deduplicated`、`suppressed`、`failed`、非零退出、无 JSON 或 `ok=false` 均不得声称已发送。该表述仍只代表 Bark 服务接受请求，不证明手机已经展示。`state_write_error` 且返回 `requires_permission_retry=true` 时，使用完全相同的事项与状态在窄授权下重试一次；再次失败则明确报告，不得静默继续。
 
 ### 7.4 AGENTS.md 写入安全
 
@@ -856,6 +856,21 @@ Ticket 1 通过前不拆实现型后续 Ticket；可以记录候选 backlog，�
 11. Onboarding 是否需要对三个默认效果逐一发送真机声音预览。
 
 剩余项目逐项过会后，再执行 Grill Me With Doc、更新 Spec，最后拆解 Ticket。拆票时 Ticket 1 固定为最小 MVP 验证闭环；本阶段只冻结拆票原则，不提前创建 Ticket。
+
+### 19.3 用户订阅与优先级配置开工基线（2026-08-08）
+
+以下决策已经与用户逐项确认，可直接用于拆票和实现；第 19.2 节仍未冻结的高级产品项不得阻塞这条最小闭环，也不得被实现过程擅自决定：
+
+1. 订阅只属于当前 Codex 顶层任务，不跨任务、项目或全局共享。
+2. 订阅默认一次性；只有用户明确表达“每次”“持续”等重复意图时才创建重复订阅，主 Agent 不根据模糊语境擅自推断。
+3. 自然语言条件是否满足由顶层主 Agent 判断；本阶段不增加后台监控、定时器或任务停止后的独立事件理解。
+4. 使用 `UserPromptSubmit` 与 `SessionStart(^compact$)` 双 Hook 恢复最小订阅上下文；用户拒绝 Hook 时降级为当前上下文内的 best-effort。
+5. `subscriptions_enabled` 默认开启。关闭后不创建、不恢复、不触发订阅，但保留已有记录；重新开启后继续生效。内置条件不受该开关影响。
+6. 用户可以列出、取消和显式替换订阅。替换会取消旧 revision 并创建新 revision，不原地改变已经触发或排队中的事件。
+7. 一次性订阅只有在 Bark 接受通知，或证明同一订阅、同一 fulfillment event 已有 accepted 记录时才消费；queued、普通 dedup 和失败都不消费。失败进入可显式 retry 或 rearm 的状态。
+8. 优先级固定为 P0–P3；Severe Risk、Blocking、用户订阅的初始默认值继续分别为 P0、P1、P2，但三类条件均可调整优先级。P3 默认没有效果，配置有效默认效果或条件覆盖前不可用于启用条件。
+9. 有效效果继续按“条件效果覆盖 > 优先级默认效果”解析。调整优先级默认效果只影响没有条件覆盖的条件。
+10. 首版效果编辑支持 `level`、`sound`、仅 Critical 使用的 `volume`、`call` 和本地 `delivery_ttl_seconds`。图标固定；Bark 归档沿用 App 默认，不在本阶段开放归档策略或归档 TTL。
 
 ## 20. 独立审计结论
 

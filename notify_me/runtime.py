@@ -5,7 +5,9 @@ import hmac
 import json
 import os
 import re
+import stat
 import tempfile
+from pathlib import Path
 
 from .constants import (
     CONDITION_EFFECTS,
@@ -13,6 +15,7 @@ from .constants import (
     CONDITION_TITLES,
     ICON_URL,
 )
+from .configuration import bark_effect, resolve_condition_configuration
 from .errors import NotifyMeError
 from .storage import StateStore
 from .task_context import resolve_task_context
@@ -21,6 +24,11 @@ from .transport import BarkEndpoint
 
 _SAFE_ACTION = re.compile(r"[^\r\n]{1,160}$")
 _SAFE_CONTEXT_LABEL = re.compile(r"[^\r\n]{1,80}$")
+_PUBLIC_SECRET_PATTERN = re.compile(
+    r"(?:https?://|ftp://|\b(?:api[-_ ]?key|access[-_ ]?token|auth(?:entication)?|bearer|credential|password|passwd|secret|private[-_ ]?key)\b|\b(?:sk|pk|rk)-[A-Za-z0-9_-]{8,})",
+    re.IGNORECASE,
+)
+_PUBLIC_LONG_TOKEN_PATTERN = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9_-]{32,}(?![A-Za-z0-9])")
 _MACHINE_ACTION = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+){2,}$")
 _WORKER_ROLES = {
     "subagent",
@@ -35,6 +43,19 @@ _WORKER_ROLES = {
     "coordinator-managed-worker",
     "coordinator-managed-ticket-worker",
 }
+
+
+def _reject_untrusted_components(path):
+    aliases = {Path("/var"), Path("/tmp")}
+    for component in (path, *path.parents):
+        try:
+            info = component.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise NotifyMeError("binding_unavailable", "无法检查本地 Bark 私有路径") from exc
+        if stat.S_ISLNK(info.st_mode) and component not in aliases:
+            raise NotifyMeError("binding_invalid", "本地 Bark 私有路径不能包含符号链接")
 
 _DELIVERY_ACTIONS = {
     "retryable_http": "请检查 Bark 服务后稍后重新运行此通知流程。",
@@ -58,12 +79,12 @@ def _fingerprint(value):
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
 
-def _scope_key(store, canonical_scope):
+def scope_key(store, canonical_scope, db_timeout=2.0):
     if not isinstance(canonical_scope, str) or not canonical_scope:
         raise NotifyMeError("scope_unavailable", "当前任务缺少可验证的作用域")
     if len(canonical_scope) > 256 or any(char.isspace() for char in canonical_scope):
         raise NotifyMeError("scope_unavailable", "当前任务作用域格式无效")
-    salt = store.get_setting("scope_salt")
+    salt = store.get_setting("scope_salt", db_timeout=db_timeout)
     if not isinstance(salt, str) or not salt:
         raise NotifyMeError("scope_unavailable", "当前任务作用域无法验证")
     try:
@@ -71,6 +92,9 @@ def _scope_key(store, canonical_scope):
     except ValueError as exc:
         raise NotifyMeError("scope_unavailable", "当前任务作用域无法验证") from exc
     return hmac.new(secret, canonical_scope.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+_scope_key = scope_key
 
 
 def resolve_scope(env):
@@ -102,7 +126,13 @@ def actor_is_suppressed(actor_role=None, worker_id=None, env=None):
 
 
 def _context_label(value):
-    if isinstance(value, str) and _SAFE_CONTEXT_LABEL.fullmatch(value):
+    if (
+        isinstance(value, str)
+        and _SAFE_CONTEXT_LABEL.fullmatch(value)
+        and not any(ord(char) < 32 or ord(char) in (0x7F, 0x2028, 0x2029) for char in value)
+        and not _PUBLIC_SECRET_PATTERN.search(value)
+        and not _PUBLIC_LONG_TOKEN_PATTERN.search(value)
+    ):
         return value
     return None
 
@@ -118,7 +148,13 @@ def _title(condition_id, task_title, private):
 def _body(action, private, project_name=None):
     if private:
         return "请查看 Codex 中待处理事项"
-    if not isinstance(action, str) or not _SAFE_ACTION.fullmatch(action):
+    if (
+        not isinstance(action, str)
+        or not _SAFE_ACTION.fullmatch(action)
+        or any(ord(char) < 32 or ord(char) in (0x7F, 0x2028, 0x2029) for char in action)
+        or _PUBLIC_SECRET_PATTERN.search(action)
+        or _PUBLIC_LONG_TOKEN_PATTERN.search(action)
+    ):
         raise NotifyMeError("invalid_action", "通知动作必须是一行不超过 160 字符的文本")
     if _MACHINE_ACTION.fullmatch(action):
         raise NotifyMeError(
@@ -126,7 +162,8 @@ def _body(action, private, project_name=None):
             "通知动作必须是面向用户的自然语言，不能使用内部 slug 或标识符",
         )
     project = _context_label(project_name)
-    return action + "（所属项目：" + project + "）" if project else action
+    with_project = action + "（所属项目：" + project + "）" if project else action
+    return with_project if len(with_project) <= 160 else action
 
 
 def _build_payload(endpoint, title, body, notification_id, effect):
@@ -138,7 +175,7 @@ def _build_payload(endpoint, title, body, notification_id, effect):
         "icon": ICON_URL,
         "id": notification_id,
     }
-    payload.update(effect)
+    payload.update(bark_effect(effect))
     return payload
 
 
@@ -150,6 +187,7 @@ def build_payload(
     private=False,
     task_title=None,
     project_name=None,
+    effect=None,
 ):
     if condition_id not in CONDITION_PRIORITY:
         raise NotifyMeError("invalid_condition", "MVP 只支持固定内置通知条件")
@@ -158,7 +196,7 @@ def build_payload(
         _title(condition_id, task_title, private),
         _body(action, private, project_name),
         notification_id,
-        CONDITION_EFFECTS[condition_id],
+        CONDITION_EFFECTS[condition_id] if effect is None else effect,
     )
 
 
@@ -172,11 +210,50 @@ def build_test_payload(endpoint):
     )
 
 
+def build_subscription_payload(
+    endpoint,
+    notification_id,
+    summary,
+    effect,
+    private=False,
+    task_title=None,
+    project_name=None,
+):
+    title = "🔔 用户订阅"
+    if not private:
+        label = _context_label(task_title)
+        if label:
+            title += "｜" + label
+    action = "订阅条件已满足：" + summary
+    return _build_payload(
+        endpoint,
+        title,
+        _body(action, private, project_name),
+        notification_id,
+        effect,
+    )
+
+
 def load_endpoint(paths):
+    _reject_untrusted_components(paths.config_dir)
+    if not paths.config_dir.exists() or paths.config_dir.is_symlink() or not paths.config_dir.is_dir():
+        raise NotifyMeError("binding_invalid", "本地 Bark 私有目录无效")
+    try:
+        directory_mode = stat.S_IMODE(paths.config_dir.lstat().st_mode)
+    except OSError as exc:
+        raise NotifyMeError("binding_unavailable", "无法检查本地 Bark 私有目录权限") from exc
+    if directory_mode & 0o077:
+        raise NotifyMeError("binding_permissions", "本地 Bark 私有目录必须保持 0700 权限")
     if not paths.dotenv.exists():
         raise NotifyMeError("not_bound", "尚未绑定 Bark 地址")
     if paths.dotenv.is_symlink() or not paths.dotenv.is_file():
         raise NotifyMeError("binding_invalid", "本地 Bark 绑定无效，请重新绑定")
+    try:
+        mode = stat.S_IMODE(paths.dotenv.lstat().st_mode)
+    except OSError as exc:
+        raise NotifyMeError("binding_unavailable", "无法检查本地 Bark 绑定权限") from exc
+    if mode & 0o077:
+        raise NotifyMeError("binding_permissions", "本地 Bark 绑定必须保持 0600 权限")
     try:
         lines = paths.dotenv.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError) as exc:
@@ -195,8 +272,14 @@ def load_endpoint(paths):
 
 
 def save_endpoint(paths, endpoint):
-    if not paths.config_dir.exists() or paths.config_dir.is_symlink():
+    _reject_untrusted_components(paths.config_dir)
+    if not paths.config_dir.exists() or paths.config_dir.is_symlink() or not paths.config_dir.is_dir():
         raise NotifyMeError("not_initialized", "请先执行 onboarding initialize")
+    try:
+        if stat.S_IMODE(paths.config_dir.lstat().st_mode) & 0o077:
+            raise NotifyMeError("binding_permissions", "本地 Bark 私有目录必须保持 0700 权限")
+    except OSError as exc:
+        raise NotifyMeError("binding_permissions", "无法检查本地 Bark 私有目录权限") from exc
     if paths.dotenv.exists() and paths.dotenv.is_symlink():
         raise NotifyMeError("binding_invalid", "本地 Bark 绑定文件不能是符号链接")
     data = "BARK_URL={}\n".format(endpoint.server + "/" + endpoint.key).encode("utf-8")
@@ -279,7 +362,8 @@ def send_condition(store, endpoint, transport, condition_id, item_id, state, act
     event_state_key = hmac.new(
         scope_key.encode("ascii"), state.encode("utf-8"), hashlib.sha256
     ).hexdigest()
-    effect = CONDITION_EFFECTS[condition_id]
+    resolved = resolve_condition_configuration(store, condition_id)
+    effect = resolved["effect"]
     effect_fingerprint = _fingerprint(effect)
     notification_id = "nm_" + hmac.new(
         scope_key.encode("ascii"),
@@ -294,6 +378,7 @@ def send_condition(store, endpoint, transport, condition_id, item_id, state, act
         private,
         task_title,
         project_name,
+        effect,
     )
     row = {
         "notification_id": notification_id,
@@ -323,7 +408,8 @@ def send_condition(store, endpoint, transport, condition_id, item_id, state, act
         "status": final_status,
         "notification_id": notification_id,
         "condition_id": condition_id,
-        "priority": CONDITION_PRIORITY[condition_id],
+        "priority": resolved["priority"],
+        "effect_source": resolved["effect_source"],
         "category": result.category,
         "attempts": result.attempts,
         "message": "Bark 通知已推送；手机是否显示仍需由用户确认"

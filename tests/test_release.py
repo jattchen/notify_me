@@ -16,13 +16,13 @@ class MvpPackageContractTests(unittest.TestCase):
         manifest = json.loads((root / ".codex-plugin" / "plugin.json").read_text())
 
         self.assertEqual(manifest["name"], "notify-me")
-        self.assertRegex(manifest["version"], r"^0\.1\.0(?:\+codex\.[0-9A-Za-z.-]+)?$")
+        self.assertRegex(manifest["version"], r"^0\.2\.0(?:\+codex\.[0-9A-Za-z.-]+)?$")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertEqual(manifest["author"]["name"], "Notify Me Contributors")
         self.assertEqual(manifest["interface"]["displayName"], "Notify Me")
-        self.assertNotIn("hooks", manifest)
+        self.assertEqual(manifest["hooks"], "./hooks/hooks.json")
         self.assertTrue((root / "skills" / "notify-me" / "SKILL.md").is_file())
-        self.assertFalse((root / "hooks").exists())
+        self.assertTrue((root / "hooks" / "hooks.json").is_file())
 
         agent_metadata = (root / "skills" / "notify-me" / "agents" / "openai.yaml").read_text()
         self.assertIn("interface:", agent_metadata)
@@ -248,7 +248,7 @@ class MvpPackageContractTests(unittest.TestCase):
             self.assertEqual(shared_bin.stat().st_mode & 0o777, 0o755)
             self.assertEqual((shared_bin / "notify-me").stat().st_mode & 0o777, 0o700)
 
-    def test_skill_and_manifest_describe_both_fixed_conditions_without_hooks(self):
+    def test_skill_and_manifest_describe_fixed_conditions_and_only_recovery_hooks(self):
         root = Path(__file__).resolve().parents[1]
         skill = (root / "skills" / "notify-me" / "SKILL.md").read_text()
         manifest = json.loads((root / ".codex-plugin" / "plugin.json").read_text())
@@ -260,5 +260,6 @@ class MvpPackageContractTests(unittest.TestCase):
         self.assertIn("Agent 即将结束", skill)
         self.assertNotIn("python3 notify_me.py", skill)
         self.assertIn("scripts/notify_me.py", skill)
-        self.assertNotIn("hooks", manifest)
-        self.assertFalse((root / "hooks").exists())
+        self.assertEqual(manifest["hooks"], "./hooks/hooks.json")
+        hooks = json.loads((root / "hooks" / "hooks.json").read_text())["hooks"]
+        self.assertEqual(set(hooks), {"UserPromptSubmit", "SessionStart"})

@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 
 from notify_me.cli import run_cli
+from notify_me.constants import SCHEMA_VERSION
 from notify_me.errors import NotifyMeError
 from notify_me.runtime import resolve_scope
 from notify_me.transport import FakeBarkTransport, TransportResult
@@ -177,7 +178,8 @@ class MvpActivationTests(unittest.TestCase):
             database = Path(env["NOTIFY_ME_CONFIG_DIR"], "state.sqlite3")
             with sqlite3.connect(database) as connection:
                 connection.execute(
-                    "UPDATE schema_migrations SET checksum = 'tampered' WHERE version = 3"
+                    "UPDATE schema_migrations SET checksum = 'tampered' WHERE version = ?",
+                    (SCHEMA_VERSION,),
                 )
                 connection.commit()
 
