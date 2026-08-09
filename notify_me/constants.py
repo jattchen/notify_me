@@ -83,6 +83,20 @@ def _direct_managed_block(
 def managed_block(launcher_command):
     return "\n".join(
         (
+            "<!-- notify-me:managed:start version=8 -->",
+            "仅顶层、直接面向用户的主 Agent 持续判断 Notify Me 内置条件。任务阻塞包括：必须向用户索取缺失信息、亲自授权、实质选择或外部操作，且用户响应前没有可继续的主线工作；严重风险指继续执行可能造成灾难性或大范围不可逆影响。",
+            "用户明确提出“通知我”“提醒我”“以后当……时通知我”等自然语言订阅请求时，主 Agent 必须读取 Notify Me Skill，在当前任务作用域创建或复用订阅；创建命令成功前不得只口头承诺未来会通知。",
+            "命中内置条件后无需读取 Notify Me Skill，直接以宿主提权模式调用固定入口 {0} send --condition-id blocking|severe-risk --item-id <稳定事项标识> --state <稳定语义状态> --action <面向用户的自然语言动作>。有效用户订阅由恢复 Hook 注入；订阅条件满足时直接调用 {0} subscription trigger --subscription-id <订阅标识> --fulfillment-id <稳定满足事件标识>。授权前缀必须精确限制为该固定入口。固定入口自动读取真实任务标题和项目归属。普通问答、进度、完成（除非命中用户订阅）、已获授权的常规敏感操作及任何子 Agent、委派 Agent、Ticket Worker 均不得调用。".format(launcher_command),
+            "调用工具时将 yield_time_ms 设为 30000，等待命令一次性返回最终 JSON。",
+            "只有返回 ok=true 且 status=accepted 时才可说 Bark 通知已推送；queued、deduplicated、suppressed、failed 或任何错误都不得声称已发送。",
+            "<!-- notify-me:managed:end -->",
+        )
+    )
+
+
+def legacy_managed_block_v7(launcher_command):
+    return "\n".join(
+        (
             "<!-- notify-me:managed:start version=7 -->",
             "仅顶层、直接面向用户的主 Agent 持续判断 Notify Me 内置条件。任务阻塞包括：必须向用户索取缺失信息、亲自授权、实质选择或外部操作，且用户响应前没有可继续的主线工作；严重风险指继续执行可能造成灾难性或大范围不可逆影响。",
             "命中内置条件后无需读取 Notify Me Skill，直接以宿主提权模式调用固定入口 {0} send --condition-id blocking|severe-risk --item-id <稳定事项标识> --state <稳定语义状态> --action <面向用户的自然语言动作>。有效用户订阅由恢复 Hook 注入；订阅条件满足时直接调用 {0} subscription trigger --subscription-id <订阅标识> --fulfillment-id <稳定满足事件标识>。授权前缀必须精确限制为该固定入口。固定入口自动读取真实任务标题和项目归属。普通问答、进度、完成（除非命中用户订阅）、已获授权的常规敏感操作及任何子 Agent、委派 Agent、Ticket Worker 均不得调用。".format(launcher_command),

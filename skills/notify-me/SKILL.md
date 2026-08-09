@@ -1,6 +1,6 @@
 ---
 name: notify-me
-description: "Notify Me：私密绑定 Bark，为任务阻塞、严重风险和当前任务用户订阅发送可配置优先级通知。"
+description: "Notify Me：私密绑定 Bark；用户说“通知我/提醒我/以后当……时通知我”或任务阻塞/严重风险时，创建或触发当前任务通知。"
 ---
 
 # Notify Me
@@ -30,7 +30,7 @@ python3 <notify-me-skill>/scripts/notify_me.py agents-rule commit --authorize
 
 ## 用户订阅与优先级配置
 
-用户可用自然语言要求创建订阅；传给 CLI 的 `--summary` 必须是最小语义摘要，不能复制完整 prompt。没有明确“每次、持续”等重复意图时不要传 `--repeat`：
+收到明确的自然语言订阅请求时不要只口头答应：先读取 Notify Me Skill 的本节规则，在当前任务作用域创建或复用订阅，并等待创建命令成功后再向用户确认。用户说“以后”“凡是”“每次”或“持续”时使用 `--repeat`；只说“这次”或“完成后”时创建一次性订阅；触发条件不清楚时先澄清。当前版本默认订阅范围是当前任务，不能静默扩大到其他任务。传给 CLI 的 `--summary` 必须是最小语义摘要，不能复制完整 prompt。没有明确重复意图时不要传 `--repeat`：
 
 ```text
 <stable-launcher> subscription create --summary <最小摘要> [--repeat] [--priority P0|P1|P2|P3]

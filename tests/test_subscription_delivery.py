@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from notify_me.cli import run_cli
+from notify_me.errors import NotifyMeError
 from notify_me.storage import StateStore, resolve_storage_paths
 from notify_me.subscriptions import current_scope_key, drain_outbox, trigger_subscription
 from notify_me.transport import BarkEndpoint, FakeBarkTransport, TransportResult
@@ -143,6 +144,23 @@ class SubscriptionDeliveryTests(unittest.TestCase):
             self.assertEqual(duplicate["status"], "deduplicated")
             self.assertEqual(duplicate["previous_status"], "accepted")
             self.assertEqual(len(fake.payloads), 1)
+
+    def test_subscription_cannot_trigger_from_another_top_level_task_scope(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env, store, endpoint, subscription = self.make_context(temp_dir, repeat=True)
+            other_env = {**env, "NOTIFY_ME_TEST_SCOPE": "another-top-level-task"}
+
+            with self.assertRaises(NotifyMeError) as raised:
+                self.trigger(
+                    store,
+                    endpoint,
+                    subscription,
+                    other_env,
+                    "animal-mentioned-in-task-b",
+                    FakeBarkTransport(),
+                )
+
+            self.assertEqual(raised.exception.code, "subscription_not_found")
 
     def test_repeating_subscription_accepts_distinct_fulfillment_events(self):
         with tempfile.TemporaryDirectory() as temp_dir:

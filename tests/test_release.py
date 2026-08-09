@@ -89,6 +89,17 @@ class MvpPackageContractTests(unittest.TestCase):
         self.assertIn("onboarding confirm", skill)
         self.assertNotIn("每轮", skill)
 
+    def test_skill_requires_natural_language_subscription_creation_before_promising(self):
+        root = Path(__file__).resolve().parents[1]
+        skill = (root / "skills" / "notify-me" / "SKILL.md").read_text()
+
+        self.assertIn("不要只口头答应", skill)
+        self.assertIn("以后", skill)
+        self.assertIn("凡是", skill)
+        self.assertIn("每次", skill)
+        self.assertIn("当前任务", skill)
+        self.assertIn("创建命令成功", skill)
+
     def test_skill_requires_narrow_escalation_and_never_claims_failed_delivery(self):
         root = Path(__file__).resolve().parents[1]
         skill = (root / "skills" / "notify-me" / "SKILL.md").read_text()
