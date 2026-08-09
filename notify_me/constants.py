@@ -15,7 +15,9 @@ HOOK_MANIFEST = {
                 "type": "command",
                 "command": "python3 \"$PLUGIN_ROOT/skills/notify-me/scripts/notify_me.py\" hook user-prompt",
                 "commandWindows": "py -3 \"%PLUGIN_ROOT%\\skills\\notify-me\\scripts\\notify_me.py\" hook user-prompt",
-                "timeout": 0.75,
+                # Codex's manifest schema accepts integer seconds.  The hook
+                # runtime enforces the stricter 750ms fail-open budget.
+                "timeout": 1,
             }]
         }],
         "SessionStart": [{
@@ -24,7 +26,9 @@ HOOK_MANIFEST = {
                 "type": "command",
                 "command": "python3 \"$PLUGIN_ROOT/skills/notify-me/scripts/notify_me.py\" hook session-start",
                 "commandWindows": "py -3 \"%PLUGIN_ROOT%\\skills\\notify-me\\scripts\\notify_me.py\" hook session-start",
-                "timeout": 0.75,
+                # Codex's manifest schema accepts integer seconds.  The hook
+                # runtime enforces the stricter 750ms fail-open budget.
+                "timeout": 1,
             }]
         }],
     },

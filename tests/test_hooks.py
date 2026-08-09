@@ -89,6 +89,8 @@ class SubscriptionHookTests(unittest.TestCase):
 
         self.assertEqual(set(manifest["hooks"]), {"UserPromptSubmit", "SessionStart"})
         self.assertEqual(manifest["hooks"]["SessionStart"][0]["matcher"], "^compact$")
+        self.assertEqual(manifest["hooks"]["UserPromptSubmit"][0]["hooks"][0]["timeout"], 1)
+        self.assertEqual(manifest["hooks"]["SessionStart"][0]["hooks"][0]["timeout"], 1)
         serialized = json.dumps(manifest)
         self.assertNotIn("Stop", serialized)
         self.assertNotIn("PermissionRequest", serialized)

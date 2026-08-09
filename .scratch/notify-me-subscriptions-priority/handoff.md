@@ -28,7 +28,8 @@
 ## 发布状态
 
 - 已提交到当前 `main`：`27c78ea`（`feat: add subscription priorities and reliable hooks`）。
-- 已将同一提交安装到 Codex 个人插件缓存 `0.2.0+codex.20260808`，旧 `0.1.0` 目录保留用于回滚。
+- 已将本次修复安装到 Codex 个人插件缓存 `0.2.0+codex.20260809`；旧版本目录保留用于回滚。
+- Hook manifest 使用 Codex 要求的整数秒 `timeout=1`，运行时内部仍执行 750ms fail-open 预算。
 - 已用新版运行时把现有私有状态库迁移到 schema 7，并刷新 `/Users/mac/.local/bin/notify-me` 稳定入口；Bark 绑定保持有效。
 - 全局 `/Users/mac/.codex/AGENTS.md` 没有修改，仍需用户单独确认后才可升级托管块；更新后需要新任务/重启才能热加载。
 

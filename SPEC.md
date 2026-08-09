@@ -195,6 +195,7 @@ Codex 初始上下文只获得 Skill 的名称与描述，只有显式调用或�
 - 两个 Hook 可重复运行；相同 `scope_key + context_revision` 的恢复结果必须幂等。
 - Hook 错误默认 fail-open，只记录脱敏健康状态，不阻断用户 prompt 或模型请求。
 - Hook 总预算 750ms；每次最多 claim 当前 scope 的 1 个到期 outbox 项，单次网络补发预算 500ms。超时保留队列和租约恢复信息，不等待第二次网络尝试。
+- Codex Hook manifest 的 `timeout` 字段只能使用整数秒；本插件声明 1 秒宿主上限，并在运行时内部以 750ms 硬预算 fail-open，网络补发仍限制为 500ms。
 
 这两个 Hook 不会为了无通知回合完整加载 Skill，也不会像 `Stop` Hook 那样制造 continuation。若用户拒绝启用 Hook，内置条件仍可使用，但持久订阅降级为当前上下文内的 best-effort；到期 outbox 只能在下一次 Notify Me 调用或显式 `drain` 时补发。
 
