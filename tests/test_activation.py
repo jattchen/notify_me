@@ -14,6 +14,7 @@ from notify_me.constants import (
     legacy_managed_block_v4,
     legacy_managed_block_v5_pushed,
     legacy_managed_block_v7,
+    legacy_managed_block_v8,
     managed_block,
 )
 from notify_me.storage import StateStore, resolve_storage_paths
@@ -94,8 +95,18 @@ class AgentsRuleActivationTests(unittest.TestCase):
             self.assertTrue(resolve_storage_paths(env).legacy_launcher.is_file())
             self.assertNotIn(" ", str(launcher))
             self.assertIn(str(launcher), plan["managed_block"])
-            self.assertIn("version=8", plan["managed_block"])
+            self.assertIn("version=9", plan["managed_block"])
             self.assertIn("自然语言订阅请求", plan["managed_block"])
+            self.assertIn("完全相同的新名称作为 --task-title", plan["managed_block"])
+            self.assertIn("非隐私 Notify Me", plan["managed_block"])
+            self.assertNotIn("最终答复", plan["managed_block"])
+            title_rule_lines = [
+                line
+                for line in plan["managed_block"].splitlines()
+                if "任务目标已经明确或方向发生明显变化" in line
+            ]
+            self.assertEqual(len(title_rule_lines), 1)
+            self.assertEqual(title_rule_lines[0].count("。"), 1)
             self.assertIn("yield_time_ms 设为 30000", plan["managed_block"])
             self.assertIn("调用固定入口", plan["managed_block"])
             self.assertIn("直接以宿主提权模式", plan["managed_block"])
@@ -213,7 +224,7 @@ class AgentsRuleActivationTests(unittest.TestCase):
             self.assertEqual(plan["change"], "upgrade")
             self.assertTrue(committed["changed"])
             content = agents.read_text(encoding="utf-8")
-            self.assertIn("version=8", content)
+            self.assertIn("version=9", content)
             self.assertIn("yield_time_ms 设为 30000", content)
 
     def test_pushed_wording_v5_block_is_safely_upgraded(self):
@@ -230,10 +241,10 @@ class AgentsRuleActivationTests(unittest.TestCase):
             plan = run_cli(["agents-rule", "plan"], env=env)
 
             self.assertEqual(plan["change"], "upgrade")
-            self.assertIn("version=8", plan["managed_block"])
+            self.assertIn("version=9", plan["managed_block"])
             self.assertIn("Bark 通知已推送", plan["managed_block"])
 
-    def test_existing_v7_managed_block_is_safely_upgraded_to_v8(self):
+    def test_existing_v7_managed_block_is_safely_upgraded_to_v9(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             env = self.environment(temp_dir)
             self.prepare_activation(env)
@@ -250,8 +261,28 @@ class AgentsRuleActivationTests(unittest.TestCase):
             self.assertEqual(plan["change"], "upgrade")
             self.assertTrue(committed["changed"])
             content = agents.read_text(encoding="utf-8")
-            self.assertIn("version=8", content)
+            self.assertIn("version=9", content)
             self.assertIn("自然语言订阅请求", content)
+
+    def test_existing_v8_managed_block_is_safely_upgraded_to_v9(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self.environment(temp_dir)
+            self.prepare_activation(env)
+            codex_home = Path(env["CODEX_HOME"])
+            codex_home.mkdir()
+            agents = codex_home / "AGENTS.md"
+            launcher = resolve_storage_paths(env).launcher
+            legacy = legacy_managed_block_v8(shlex.quote(str(launcher)))
+            agents.write_text("user content\n" + legacy + "\n", encoding="utf-8")
+
+            plan = run_cli(["agents-rule", "plan"], env=env)
+            committed = run_cli(["agents-rule", "commit", "--authorize"], env=env)
+
+            self.assertEqual(plan["change"], "upgrade")
+            self.assertTrue(committed["changed"])
+            content = agents.read_text(encoding="utf-8")
+            self.assertIn("version=9", content)
+            self.assertIn("完全相同的新名称作为 --task-title", content)
 
     def test_rule_install_reports_restart_until_a_new_task_verifies_it(self):
         with tempfile.TemporaryDirectory() as temp_dir:

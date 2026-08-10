@@ -1,6 +1,6 @@
 # Notify Me
 
-Notify Me 是由 Codex 主 Agent 驱动的手机通知上下文。它只负责保存通知意图、判断结果的投递记录与 Bark 效果，不负责管理 Codex 任务标题、置顶或生命周期。
+Notify Me 是由 Codex 主 Agent 驱动的手机通知上下文。它负责保存通知意图、判断结果的投递记录与 Bark 效果，并通过托管规则协调主 Agent 使用宿主能力改准确当前任务名称；插件运行时不持久化或修改任务标题、置顶和生命周期。
 
 ## Language
 

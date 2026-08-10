@@ -5,7 +5,7 @@ description: "Notify Me：私密绑定 Bark；用户说“通知我/提醒我/�
 
 # Notify Me
 
-Notify Me 只负责本地激活、私密 Bark 绑定、任务作用域用户订阅和通知投递。它提供两个内置条件：`blocking` 初始使用 P1，`severe-risk` 初始使用 P0；用户订阅初始使用 P2。三类条件均可调整 P0–P3，并按“条件效果覆盖 > 优先级默认效果”解析。它不管理任务标题、置顶、归档或生命周期，也不提供后台监控。
+Notify Me 只负责本地激活、私密 Bark 绑定、任务作用域用户订阅和通知投递。它提供两个内置条件：`blocking` 初始使用 P1，`severe-risk` 初始使用 P0；用户订阅初始使用 P2。三类条件均可调整 P0–P3，并按“条件效果覆盖 > 优先级默认效果”解析。托管规则协调主 Agent 使用宿主能力改准确当前任务名称；插件运行时不持久化或修改任务标题、置顶、归档和生命周期，也不提供后台监控。
 
 以下命令中的 `<notify-me-skill>` 指当前这份 `SKILL.md` 所在的安装态 Skill 目录，Onboarding 入口是其中的 `scripts/notify_me.py`。必须直接使用宿主技能清单提供的精确 `SKILL.md` 路径并取其父目录；不得使用记忆中的旧版本号，不得扫描或猜测其他安装目录和版本号，也不要从调用者 cwd 猜测仓库根入口。如果宿主没有提供可读取的精确路径，应报告 Skill 加载失败，不能用 `rg`、`find` 或候选目录探测来修复。
 
@@ -48,7 +48,7 @@ python3 <notify-me-skill>/scripts/notify_me.py agents-rule commit --authorize
 恢复 Hook 会给出订阅 ID、revision、优先级、一次性/重复和最小摘要。只有顶层主 Agent 判断条件满足时才调用：
 
 ```text
-<stable-launcher> subscription trigger --subscription-id <订阅标识> --fulfillment-id <稳定满足事件标识>
+<stable-launcher> subscription trigger --subscription-id <订阅标识> --fulfillment-id <稳定满足事件标识> [--task-title <同轮改名使用的完全相同新名称>]
 ```
 
 一次性订阅只在 Bark `accepted`，或同一 fulfillment 已有 accepted 记录时消费；`queued` 只表示已写入本地 outbox，不能说手机已收到。可用 `subscription retry` 显式重试仍在队列中的同一 fulfillment，永久失败则执行 `subscription rearm --subscription-id <订阅标识>` 后等待新的满足事件。`drain` 只尝试当前任务的一个到期队列项；重复订阅对每个独立 fulfillment 发送一次，直到用户取消。
@@ -83,9 +83,9 @@ Onboarding 第一次申请这类权限时，应请求一条可复用授权，安
 
 `item-id` 与 `state` 是稳定的内部机器标识；`action` 会原样成为 Bark 正文，必须使用与用户相同语言、简短且面向用户的自然语言，例如“请提供准确的四位确认码”。不得使用 slug、snake_case、内部状态名、命令、路径或日志作为 `action`。含空格的正文应作为一个完整命令参数传入。
 
-正常模式由稳定入口自动读取 Codex 当前任务的真实可见标题，不让 Agent 概括、改写或手工传递；标题不可用时只显示条件名称。项目归属从 Codex 的任务项目映射读取，使用项目根文件夹名称在正文末尾追加中文括号；任务明确标记为无项目时不追加，即使临时 cwd 看起来像某个项目也不能猜测。
+正常模式由稳定入口自动读取 Codex 当前任务的真实可见标题；只有同一轮刚发起任务改名时，主 Agent 才把完全相同的新名称作为 `--task-title` 快照传给 `send` 或 `subscription trigger`，使通知不依赖宿主后台索引的刷新时机，改名失败或不可用时仍继续通知并如实说明改名未完成。其他情况由运行时读取标题，标题不可用时只显示条件名称。项目归属从 Codex 的任务项目映射读取，使用项目根文件夹名称在正文末尾追加中文括号；任务明确标记为无项目时不追加，即使临时 cwd 看起来像某个项目也不能猜测。
 
-隐私模式只使用 `--private` 发送，不得传入会话标题、项目名或具体行动；标题只保留条件名称，正文固定为“请查看 Codex 中待处理事项”。隐私模式隐藏的是 Bark 请求内容，不代表通知本身不可见或提供端到端加密。
+隐私模式只使用 `--private` 发送，不传入任务标题或项目名，具体行动也不会进入 Bark 请求；标题只保留条件名称，正文固定为“请查看 Codex 中待处理事项”。隐私模式隐藏的是 Bark 请求内容，不代表通知本身不可见或提供端到端加密。
 
 `blocking` 初始使用 P1（`timeSensitive` + `telegraph`）；`severe-risk` 初始使用 P0（`critical` + `alarm` + `volume=8`）；用户订阅初始使用 P2（`active` + `glass`）。普通问答、例行进度、正常完成（除非命中用户订阅）、可自动恢复的问题以及仅因 Agent 即将结束回复都不得发送；任何子 Agent、委派 Agent、Ticket Worker 都只能向主 Agent 报告，不能直接发送，已知 worker 标识会稳定得到 `suppressed`。
 

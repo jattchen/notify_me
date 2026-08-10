@@ -24,6 +24,7 @@ from .constants import (
     legacy_managed_block_v5_pushed,
     legacy_managed_block_v6,
     legacy_managed_block_v7,
+    legacy_managed_block_v8,
     managed_block,
 )
 from .errors import NotifyMeError
@@ -42,6 +43,7 @@ _VERSIONED_STARTS = {
     "<!-- notify-me:managed:start version=6 -->",
     "<!-- notify-me:managed:start version=7 -->",
     "<!-- notify-me:managed:start version=8 -->",
+    "<!-- notify-me:managed:start version=9 -->",
 }
 
 
@@ -61,6 +63,7 @@ def _upgradeable_managed_blocks(env):
         legacy_managed_block_v5_pushed(shlex.quote(str(paths.launcher))),
         legacy_managed_block_v6(shlex.quote(str(paths.launcher))),
         legacy_managed_block_v7(shlex.quote(str(paths.launcher))),
+        legacy_managed_block_v8(shlex.quote(str(paths.launcher))),
     )
 
 

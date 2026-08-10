@@ -453,6 +453,126 @@ class MvpActivationTests(unittest.TestCase):
                 "请提供准确的四位确认码（所属项目：notify_me）",
             )
 
+    def test_same_turn_renamed_title_snapshot_overrides_stale_host_index(self):
+        fake = FakeBarkTransport()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "renamed-title-snapshot",
+                "CODEX_THREAD_ID": None,
+            }
+            self.prepare_active(env, fake)
+            thread_id = "019fc427-6c68-73c3-bde9-fd2a68d06054"
+            env["CODEX_THREAD_ID"] = thread_id
+            env["NOTIFY_ME_TEST_SCOPE"] = thread_id
+            Path(env["CODEX_HOME"], "session_index.jsonl").write_text(
+                json.dumps(
+                    {"id": thread_id, "thread_name": "旧任务名称"},
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = run_cli(
+                [
+                    "send",
+                    "--condition-id",
+                    "blocking",
+                    "--item-id",
+                    "rename-race",
+                    "--state",
+                    "waiting-for-choice",
+                    "--action",
+                    "请确认处理方式",
+                    "--task-title",
+                    "准确的新任务名称",
+                ],
+                env=env,
+                transport=fake,
+            )
+
+            self.assertEqual(result["status"], "accepted")
+            self.assertEqual(
+                fake.payloads[-1]["title"], "🖐 需要操作｜准确的新任务名称"
+            )
+
+    def test_subscription_trigger_accepts_same_turn_renamed_title_snapshot(self):
+        fake = FakeBarkTransport()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "subscription-title-snapshot",
+                "CODEX_THREAD_ID": None,
+            }
+            self.prepare_active(env, fake)
+            subscription = run_cli(
+                ["subscription", "create", "--summary", "构建完成"], env=env
+            )["subscription"]
+
+            result = run_cli(
+                [
+                    "subscription",
+                    "trigger",
+                    "--subscription-id",
+                    subscription["subscription_id"],
+                    "--fulfillment-id",
+                    "build-complete-1",
+                    "--task-title",
+                    "准确的新任务名称",
+                ],
+                env=env,
+                transport=fake,
+            )
+
+            self.assertEqual(result["status"], "accepted")
+            self.assertEqual(
+                fake.payloads[-1]["title"], "🔔 用户订阅｜准确的新任务名称"
+            )
+
+    def test_private_subscription_ignores_same_turn_title_snapshot(self):
+        fake = FakeBarkTransport()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "private-subscription-title-snapshot",
+                "CODEX_THREAD_ID": None,
+            }
+            self.prepare_active(env, fake)
+            subscription = run_cli(
+                ["subscription", "create", "--summary", "构建完成"], env=env
+            )["subscription"]
+
+            result = run_cli(
+                [
+                    "subscription",
+                    "trigger",
+                    "--subscription-id",
+                    subscription["subscription_id"],
+                    "--fulfillment-id",
+                    "private-build-complete-1",
+                    "--task-title",
+                    "不应进入通知的任务名称",
+                    "--private",
+                ],
+                env=env,
+                transport=fake,
+            )
+
+            self.assertEqual(result["status"], "accepted")
+            self.assertEqual(fake.payloads[-1]["title"], "🔔 用户订阅")
+            self.assertEqual(fake.payloads[-1]["body"], "请查看 Codex 中待处理事项")
+            self.assertNotIn(
+                "不应进入通知的任务名称",
+                json.dumps(fake.payloads[-1], ensure_ascii=False),
+            )
+
     def test_send_resolves_title_but_omits_project_for_projectless_task(self):
         fake = FakeBarkTransport()
         with tempfile.TemporaryDirectory() as temp_dir:

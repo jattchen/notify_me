@@ -129,9 +129,11 @@ class MvpPackageContractTests(unittest.TestCase):
         skill = (root / "skills" / "notify-me" / "SKILL.md").read_text()
 
         self.assertIn("自动读取 Codex 当前任务的真实可见标题", skill)
+        self.assertIn("同一轮刚发起任务改名", skill)
+        self.assertIn("完全相同的新名称", skill)
         self.assertIn("明确标记为无项目", skill)
         self.assertIn("隐私模式", skill)
-        self.assertIn("不得传入会话标题、项目名或具体行动", skill)
+        self.assertIn("不传入任务标题或项目名", skill)
         self.assertIn("标题只保留条件名称", skill)
 
     def test_installed_skill_wrapper_runs_from_a_non_repository_cwd(self):
@@ -180,6 +182,35 @@ class MvpPackageContractTests(unittest.TestCase):
             self.assertEqual(initialized["status"], "unconfigured")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)["status"], "unconfigured")
+
+    def test_stable_launcher_and_source_runtime_plan_the_same_v9_rule(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_PLUGIN_ROOT": str(root),
+            }
+            run_cli(["onboarding", "initialize"], env=env)
+            codex_home = Path(env["CODEX_HOME"])
+            codex_home.mkdir()
+            (codex_home / "AGENTS.md").write_text("user\n", encoding="utf-8")
+            source_plan = run_cli(["agents-rule", "plan"], env=env)
+            launcher = Path(env["NOTIFY_ME_CONFIG_DIR"]) / "bin" / "notify-me"
+
+            installed = subprocess.run(
+                [str(launcher), "agents-rule", "plan"],
+                cwd=temp_dir,
+                env={**os.environ, **env, "PYTHONPATH": ""},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(installed.returncode, 0, installed.stderr)
+            installed_plan = json.loads(installed.stdout)
+            self.assertEqual(source_plan["managed_block"], installed_plan["managed_block"])
+            self.assertIn("version=9", installed_plan["managed_block"])
 
     def test_skill_wrapper_ignores_an_inherited_launcher_source(self):
         root = Path(__file__).resolve().parents[1]

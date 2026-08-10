@@ -582,6 +582,7 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
                 "subscription-id",
                 "fulfillment-id",
                 "private",
+                "task-title",
                 "actor-role",
                 "worker-id",
             }
@@ -609,6 +610,7 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
                     env,
                     private=private,
                     sleep=sleep,
+                    task_title=options.get("task-title"),
                     allow_retry=operation == "retry",
                 ),
             }
