@@ -453,6 +453,76 @@ class MvpActivationTests(unittest.TestCase):
                 "请提供准确的四位确认码（所属项目：notify_me）",
             )
 
+    def test_send_resolves_project_from_current_codex_project_assignment(self):
+        fake = FakeBarkTransport()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "NOTIFY_ME_CONFIG_DIR": str(Path(temp_dir) / "private"),
+                "CODEX_HOME": str(Path(temp_dir) / "codex"),
+                "NOTIFY_ME_TEST_MODE": "1",
+                "NOTIFY_ME_TEST_SCOPE": "current-project-assignment",
+                "CODEX_THREAD_ID": None,
+            }
+            self.prepare_active(env, fake)
+            thread_id = "019fec68-d6f5-7221-b4f3-36bd4902e5d1"
+            project_id = "project-notify-me"
+            env["CODEX_THREAD_ID"] = thread_id
+            env["NOTIFY_ME_TEST_SCOPE"] = thread_id
+            code_home = Path(env["CODEX_HOME"])
+            (code_home / "session_index.jsonl").write_text(
+                json.dumps(
+                    {"id": thread_id, "thread_name": "修复项目名称显示"},
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            project_path = Path(temp_dir) / "notify_me"
+            (code_home / ".codex-global-state.json").write_text(
+                json.dumps(
+                    {
+                        "thread-project-assignments": {
+                            thread_id: {
+                                "projectKind": "local",
+                                "projectId": project_id,
+                                "cwd": str(project_path),
+                            }
+                        },
+                        "local-projects": {
+                            project_id: {
+                                "id": project_id,
+                                "name": "notify_me",
+                                "rootPaths": [str(project_path)],
+                            }
+                        },
+                        "projectless-thread-ids": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = run_cli(
+                [
+                    "send",
+                    "--condition-id",
+                    "blocking",
+                    "--item-id",
+                    "current-project-context-event",
+                    "--state",
+                    "waiting-for-code",
+                    "--action",
+                    "请提供准确的四位确认码",
+                ],
+                env=env,
+                transport=fake,
+            )
+
+            self.assertEqual(result["status"], "accepted")
+            self.assertEqual(
+                fake.payloads[-1]["body"],
+                "请提供准确的四位确认码（所属项目：notify_me）",
+            )
+
     def test_same_turn_renamed_title_snapshot_overrides_stale_host_index(self):
         fake = FakeBarkTransport()
         with tempfile.TemporaryDirectory() as temp_dir:

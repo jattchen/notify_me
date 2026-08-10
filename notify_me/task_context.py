@@ -70,9 +70,19 @@ def _project_name(global_state_path, thread_id):
     if not isinstance(assignment, dict) or assignment.get("projectKind") != "local":
         return None
     raw_path = assignment.get("path")
-    if not isinstance(raw_path, str) or not raw_path:
+    if isinstance(raw_path, str) and raw_path:
+        return Path(raw_path).name or None
+    project_id = assignment.get("projectId")
+    if not isinstance(project_id, str) or not project_id:
         return None
-    return Path(raw_path).name or None
+    projects = state.get("local-projects", {})
+    if not isinstance(projects, dict):
+        return None
+    project = projects.get(project_id)
+    if not isinstance(project, dict):
+        return None
+    name = project.get("name")
+    return name if isinstance(name, str) and name else None
 
 
 def resolve_task_context(env=None):
