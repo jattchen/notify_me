@@ -15,6 +15,7 @@ from .activation import (
     plan_agents_rule,
     verify_agents_rule,
 )
+from .application_push import drain_application_outbox, push_application
 from .constants import HOOK_MANIFEST
 from .errors import NotifyMeError
 from .configuration import validate_effect
@@ -243,6 +244,9 @@ def _status(env, store):
         if database["status"] == "ready"
         else None,
         "outbox": outbox,
+        "application_outbox": store.application_outbox_summary()
+        if database["status"] == "ready"
+        else None,
     }
 
 
@@ -423,6 +427,32 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
                 project_name=options.get("project-name"),
             ),
         }
+
+    if command == "push":
+        options = _options(argv[1:])
+        allowed = {"source", "event-id", "priority", "title", "body"}
+        if set(options) != allowed:
+            raise NotifyMeError("invalid_arguments", "push 必须且只能提供 source、event-id、priority、title、body")
+        store.require_initialized()
+        endpoint = load_endpoint(paths)
+        return {
+            "ok": True,
+            **push_application(
+                store, endpoint, transport,
+                _required(options, "source"), _required(options, "event-id"),
+                _required(options, "priority"), _required(options, "title"),
+                _required(options, "body"), sleep=sleep,
+            ),
+        }
+
+    if command == "push-drain":
+        options = _options(argv[1:])
+        if set(options) - {"force"}:
+            raise NotifyMeError("invalid_arguments", "push-drain 参数不受支持")
+        force = _bool_option(options, "force") if "force" in options else False
+        store.require_initialized()
+        endpoint = load_endpoint(paths)
+        return {"ok": True, **drain_application_outbox(store, endpoint, transport, force=force, sleep=sleep)}
 
     if command == "runtime":
         if len(argv) != 2 or argv[1] != "install":

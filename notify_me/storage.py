@@ -12,6 +12,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .constants import (
+    APPLICATION_EVENTS_INDEX_SQL,
+    APPLICATION_EVENTS_TABLE_SQL,
+    APPLICATION_OUTBOX_INDEX_SQL,
+    APPLICATION_OUTBOX_TABLE_SQL,
     CONDITION_CONFIGS_TABLE_SQL,
     DEFAULT_PRIORITY_EFFECTS,
     ICON_URL,
@@ -20,6 +24,7 @@ from .constants import (
     LEGACY_SCHEMA_V5_CHECKSUM,
     LEGACY_SCHEMA_V6_CHECKSUM,
     LEGACY_SCHEMA_V7_CHECKSUM,
+    LEGACY_SCHEMA_V7_CURRENT_CHECKSUM,
     NOTIFICATIONS_INDEX_SQL,
     NOTIFICATIONS_TABLE_SQL,
     NOTIFICATION_LEASE_SECONDS,
@@ -317,7 +322,14 @@ def _create_subscription_event_payload_schema(connection):
     connection.execute(SUBSCRIPTION_EVENT_PAYLOADS_INDEX_SQL)
 
 
-def _outbox_payload_json(payload):
+def _create_application_push_schema(connection):
+    connection.execute(APPLICATION_EVENTS_TABLE_SQL)
+    connection.execute(APPLICATION_EVENTS_INDEX_SQL)
+    connection.execute(APPLICATION_OUTBOX_TABLE_SQL)
+    connection.execute(APPLICATION_OUTBOX_INDEX_SQL)
+
+
+def _outbox_payload_json(payload, expected_group="codex"):
     """Validate the persisted, credential-free subset of a Bark payload."""
 
     if not isinstance(payload, dict) or "device_key" in payload:
@@ -335,7 +347,7 @@ def _outbox_payload_json(payload):
             raise NotifyMeError("state_corrupt", "outbox 负载疑似包含敏感内容")
     if not re.fullmatch(r"nm_[a-f0-9]{40}", payload["id"]):
         raise NotifyMeError("state_corrupt", "outbox 通知身份无效")
-    if payload["group"] != "codex" or payload["icon"] != ICON_URL:
+    if payload["group"] != expected_group or payload["icon"] != ICON_URL:
         raise NotifyMeError("state_corrupt", "outbox 通知目标无效")
     if payload["level"] not in LEVELS or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", payload["sound"]):
         raise NotifyMeError("state_corrupt", "outbox 通知效果无效")
@@ -511,10 +523,9 @@ class StateStore:
                     raise NotifyMeError("state_schema_mismatch", "本地状态库结构版本不匹配")
                 _create_outbox_schema(connection)
                 _create_subscription_event_payload_schema(connection)
-            elif current == SCHEMA_VERSION:
+            elif current == 7:
                 checksum = connection.execute(
-                    "SELECT checksum FROM schema_migrations WHERE version = ?",
-                    (SCHEMA_VERSION,),
+                    "SELECT checksum FROM schema_migrations WHERE version = 7",
                 ).fetchone()
                 if checksum is None:
                     raise NotifyMeError("state_schema_mismatch", "本地状态库结构版本不匹配")
@@ -522,10 +533,11 @@ class StateStore:
                     _create_subscription_event_payload_schema(connection)
                     connection.execute(
                         "UPDATE schema_migrations SET checksum = ?, applied_at = ? WHERE version = ?",
-                        (SCHEMA_CHECKSUM, _now(), SCHEMA_VERSION),
+                        (LEGACY_SCHEMA_V7_CURRENT_CHECKSUM, _now(), 7),
                     )
-                elif checksum[0] != SCHEMA_CHECKSUM:
+                elif checksum[0] != LEGACY_SCHEMA_V7_CURRENT_CHECKSUM:
                     raise NotifyMeError("state_schema_mismatch", "本地状态库结构版本不匹配")
+                _create_application_push_schema(connection)
             else:
                 checksum = connection.execute(
                     "SELECT checksum FROM schema_migrations WHERE version = ?",
@@ -533,6 +545,8 @@ class StateStore:
                 ).fetchone()
                 if checksum is None or checksum[0] != SCHEMA_CHECKSUM:
                     raise NotifyMeError("state_schema_mismatch", "本地状态库结构版本不匹配")
+            if current < SCHEMA_VERSION:
+                _create_application_push_schema(connection)
             _seed_configuration(connection)
             connection.execute(
                 "DELETE FROM subscription_event_payloads WHERE expires_at <= ? AND event_id IN (SELECT event_id FROM subscription_events WHERE status = 'failed')",
@@ -717,6 +731,10 @@ class StateStore:
                 "subscription_event_payloads_expiry",
                 "outbox",
                 "outbox_due",
+                "application_events",
+                "application_events_status",
+                "application_outbox",
+                "application_outbox_due",
             }
             notification_columns = {
                 row[1]
@@ -1721,6 +1739,161 @@ class StateStore:
         except sqlite3.Error as exc:
             connection.rollback()
             raise NotifyMeError("state_write_error", "无法领取本地投递队列") from exc
+        finally:
+            connection.close()
+
+    def claim_application_event(
+        self, source_key, event_key, notification_id, priority, effect_fingerprint,
+        payload, delivery_ttl_seconds,
+    ):
+        """Atomically create one irreversible app event and lease its outbox item."""
+
+        self._require_database()
+        validate_priority(priority)
+        if not isinstance(delivery_ttl_seconds, int) or isinstance(delivery_ttl_seconds, bool) or delivery_ttl_seconds < 1:
+            raise NotifyMeError("invalid_payload", "应用通知投递 TTL 无效")
+        persisted = {key: value for key, value in payload.items() if key != "device_key"}
+        payload_json = _outbox_payload_json(persisted, expected_group="notify-me")
+        owner = secrets.token_hex(16)
+        connection = _connect(self.paths.state_db)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT notification_id, status FROM application_events WHERE source_key = ? AND event_key = ?",
+                (source_key, event_key),
+            ).fetchone()
+            if existing is not None:
+                connection.commit()
+                return {"status": existing[1], "notification_id": existing[0]}
+            now = _now()
+            connection.execute(
+                "INSERT INTO application_events(notification_id, source_key, event_key, priority, effect_fingerprint, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'sending', ?, ?)",
+                (notification_id, source_key, event_key, priority, effect_fingerprint, now, now),
+            )
+            connection.execute(
+                "INSERT INTO application_outbox(notification_id, payload_json, next_attempt_at, expires_at, attempts, lease_token, lease_until, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)",
+                (notification_id, payload_json, now, now + delivery_ttl_seconds, owner, now + 30, now, now),
+            )
+            connection.commit()
+            return {"status": "claimed", "notification_id": notification_id, "priority": priority, "payload": json.loads(payload_json), "attempts": 0, "lease_token": owner}
+        except NotifyMeError:
+            connection.rollback()
+            raise
+        except sqlite3.IntegrityError:
+            connection.rollback()
+            return {"status": "sending", "notification_id": notification_id}
+        except sqlite3.Error as exc:
+            connection.rollback()
+            raise NotifyMeError("state_write_error", "无法记录应用通知事件") from exc
+        finally:
+            connection.close()
+
+    def application_outbox_summary(self):
+        self._require_database()
+        connection = _connect(self.paths.state_db)
+        try:
+            row = connection.execute(
+                "SELECT COUNT(*), COALESCE(SUM(CASE WHEN next_attempt_at <= ? THEN 1 ELSE 0 END), 0), MIN(expires_at) FROM application_outbox",
+                (_now(),),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise NotifyMeError("state_read_error", "无法读取应用通知队列") from exc
+        finally:
+            connection.close()
+        return {"status": "ready", "queued": row[0], "due": row[1], "next_expiry_at": row[2]}
+
+    def claim_application_outbox(self, force=False, lease_seconds=30, db_timeout=2.0):
+        self._require_database()
+        owner = secrets.token_hex(16)
+        connection = _connect(self.paths.state_db, timeout=db_timeout)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            now = _now()
+            expired = connection.execute(
+                "SELECT notification_id FROM application_outbox WHERE expires_at <= ? ORDER BY expires_at LIMIT 1",
+                (now,),
+            ).fetchone()
+            if expired is not None:
+                connection.execute("UPDATE application_events SET status = 'failed', last_error = 'expired', updated_at = ? WHERE notification_id = ? AND status != 'accepted'", (now, expired[0]))
+                connection.execute("DELETE FROM application_outbox WHERE notification_id = ?", (expired[0],))
+                connection.commit()
+                return {"status": "expired", "notification_id": expired[0]}
+            due = "1=1" if force else "next_attempt_at <= ?"
+            parameters = [] if force else [now]
+            parameters.extend([now, now])
+            row = connection.execute(
+                "SELECT o.notification_id, o.payload_json, o.attempts, e.priority FROM application_outbox o JOIN application_events e ON e.notification_id = o.notification_id WHERE " + due + " AND o.expires_at > ? AND (o.lease_until IS NULL OR o.lease_until <= ?) ORDER BY o.next_attempt_at, o.created_at LIMIT 1",
+                parameters,
+            ).fetchone()
+            if row is None:
+                connection.commit()
+                return {"status": "empty"}
+            try:
+                payload = json.loads(row[1])
+                _outbox_payload_json(payload, expected_group="notify-me")
+            except (TypeError, ValueError, json.JSONDecodeError, NotifyMeError):
+                connection.execute("UPDATE application_events SET status = 'failed', last_error = 'invalid_payload', updated_at = ? WHERE notification_id = ? AND status != 'accepted'", (now, row[0]))
+                connection.execute("DELETE FROM application_outbox WHERE notification_id = ?", (row[0],))
+                connection.commit()
+                return {"status": "failed", "notification_id": row[0]}
+            updated = connection.execute(
+                "UPDATE application_outbox SET lease_token = ?, lease_until = ?, updated_at = ? WHERE notification_id = ? AND (lease_until IS NULL OR lease_until <= ?)",
+                (owner, now + lease_seconds, now, row[0], now),
+            )
+            if updated.rowcount != 1:
+                connection.rollback()
+                return {"status": "busy"}
+            connection.execute("UPDATE application_events SET status = 'sending', http_status = NULL, last_error = NULL, updated_at = ? WHERE notification_id = ? AND status != 'accepted'", (now, row[0]))
+            connection.commit()
+            return {"status": "claimed", "notification_id": row[0], "payload": payload, "attempts": row[2], "priority": row[3], "lease_token": owner}
+        except sqlite3.Error as exc:
+            connection.rollback()
+            raise NotifyMeError("state_write_error", "无法领取应用通知队列") from exc
+        finally:
+            connection.close()
+
+    def finalize_application_event(
+        self, notification_id, accepted, attempts, http_status, last_error,
+        retryable, backoff_seconds, lease_token, db_timeout=2.0,
+    ):
+        self._require_database()
+        connection = _connect(self.paths.state_db, timeout=db_timeout)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            now = _now()
+            outbox = connection.execute(
+                "SELECT expires_at FROM application_outbox WHERE notification_id = ? AND lease_token = ? AND lease_until > ?",
+                (notification_id, lease_token, now),
+            ).fetchone()
+            if outbox is None:
+                raise NotifyMeError("outbox_lease_lost", "应用通知投递租约已失效")
+            if outbox[0] <= now:
+                connection.execute("UPDATE application_events SET status = 'failed', last_error = 'expired', updated_at = ? WHERE notification_id = ? AND status != 'accepted'", (now, notification_id))
+                connection.execute("DELETE FROM application_outbox WHERE notification_id = ?", (notification_id,))
+                connection.commit()
+                return {"status": "expired", "notification_id": notification_id}
+            status = "accepted" if accepted else "failed"
+            updated = connection.execute(
+                "UPDATE application_events SET status = ?, attempts = attempts + ?, http_status = ?, last_error = ?, updated_at = ? WHERE notification_id = ? AND status = 'sending'",
+                (status, attempts, http_status, last_error, now, notification_id),
+            )
+            if updated.rowcount != 1:
+                raise NotifyMeError("state_corrupt", "应用通知状态无法原子更新")
+            if accepted or not retryable:
+                connection.execute("DELETE FROM application_outbox WHERE notification_id = ? AND lease_token = ?", (notification_id, lease_token))
+            else:
+                connection.execute(
+                    "UPDATE application_outbox SET attempts = attempts + ?, next_attempt_at = ?, lease_token = NULL, lease_until = NULL, updated_at = ? WHERE notification_id = ? AND lease_token = ?",
+                    (attempts, now + max(1, int(backoff_seconds)), now, notification_id, lease_token),
+                )
+            connection.commit()
+            return {"status": status, "notification_id": notification_id}
+        except NotifyMeError:
+            connection.rollback()
+            raise
+        except sqlite3.Error as exc:
+            connection.rollback()
+            raise NotifyMeError("state_write_error", "无法更新应用通知状态") from exc
         finally:
             connection.close()
 

@@ -211,8 +211,9 @@ class ReliabilityEdgeTests(unittest.TestCase):
             result = run_cli(["onboarding", "initialize"], env=env)
             self.assertTrue(result["ok"], result)
             with sqlite3.connect(database) as connection:
-                self.assertEqual(connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0], 7)
+                self.assertEqual(connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0], 8)
                 self.assertIsNotNone(connection.execute("SELECT 1 FROM sqlite_master WHERE name = 'outbox'").fetchone())
+                self.assertIsNotNone(connection.execute("SELECT 1 FROM sqlite_master WHERE name = 'application_outbox'").fetchone())
             self.assertFalse((config / "state.sqlite3.migration-backup").exists())
 
     def test_legacy_v7_checksum_is_additively_upgraded_for_retry_payloads(self):
@@ -234,7 +235,7 @@ class ReliabilityEdgeTests(unittest.TestCase):
             with sqlite3.connect(database) as connection:
                 self.assertEqual(
                     connection.execute(
-                        "SELECT checksum FROM schema_migrations WHERE version = 7"
+                        "SELECT checksum FROM schema_migrations WHERE version = 8"
                     ).fetchone()[0],
                     SCHEMA_CHECKSUM,
                 )

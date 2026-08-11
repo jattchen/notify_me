@@ -1,6 +1,6 @@
 # Notify Me
 
-Notify Me 是由 Codex 主 Agent 驱动的手机通知上下文。它负责保存通知意图、判断结果的投递记录与 Bark 效果，并通过托管规则协调主 Agent 使用宿主能力改准确当前任务名称；插件运行时不持久化或修改任务标题、置顶和生命周期。
+Notify Me 是由 Codex 主 Agent 驱动的手机通知上下文，同时向本机可信程序提供独立的应用级 Bark Push API。两类入口共享私有 Bark 绑定、优先级效果、SQLite 去重和投递可靠性，但应用级入口不读取或写入 Codex 任务上下文，也不属于 Agent send/subscription 语义。
 
 ## Language
 
@@ -83,3 +83,7 @@ _Avoid_: 单次 setup 命令、静默修改全局配置
 **通知已推送**：
 Bark 服务已接受通知请求，但手机是否展示或播放声音仍未验证。
 _Avoid_: 已收到、已送达手机
+
+**应用级通知**：
+由本机可信程序通过稳定 launcher 的 `push` 命令提交、以 `source + event-id` 幂等标识的通用 Bark 通知。它不要求任务作用域，不读取任务标题，不触发 Hook，也不伪装成用户订阅。
+_Avoid_: Agent 通知、任务订阅、后台 Hook

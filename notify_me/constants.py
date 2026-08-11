@@ -3,7 +3,7 @@
 import hashlib
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 NOTIFICATION_LEASE_SECONDS = 300
 PLUGIN_VERSION = "0.2.0"
 ICON_URL = "https://hcn58q8zsfep.feishuapp.com/app/app_17acsapfz2z/codex-bark-icon.png"
@@ -209,6 +209,10 @@ SUBSCRIPTION_EVENT_PAYLOADS_TABLE_SQL = "CREATE TABLE IF NOT EXISTS subscription
 SUBSCRIPTION_EVENT_PAYLOADS_INDEX_SQL = "CREATE INDEX IF NOT EXISTS subscription_event_payloads_expiry ON subscription_event_payloads (expires_at)"
 OUTBOX_TABLE_SQL = "CREATE TABLE IF NOT EXISTS outbox (notification_id TEXT PRIMARY KEY REFERENCES notifications(notification_id) ON DELETE CASCADE, subscription_id TEXT NOT NULL REFERENCES subscriptions(subscription_id), payload_json TEXT NOT NULL, next_attempt_at REAL NOT NULL, expires_at REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, lease_token TEXT, lease_until REAL, created_at REAL NOT NULL, updated_at REAL NOT NULL)"
 OUTBOX_INDEX_SQL = "CREATE INDEX IF NOT EXISTS outbox_due ON outbox (next_attempt_at, expires_at, lease_until)"
+APPLICATION_EVENTS_TABLE_SQL = "CREATE TABLE IF NOT EXISTS application_events (notification_id TEXT PRIMARY KEY, source_key TEXT NOT NULL, event_key TEXT NOT NULL, priority TEXT NOT NULL REFERENCES priority_effects(priority), effect_fingerprint TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('sending', 'accepted', 'failed')), created_at REAL NOT NULL, updated_at REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, http_status INTEGER, last_error TEXT, UNIQUE(source_key, event_key))"
+APPLICATION_EVENTS_INDEX_SQL = "CREATE INDEX IF NOT EXISTS application_events_status ON application_events (status, updated_at)"
+APPLICATION_OUTBOX_TABLE_SQL = "CREATE TABLE IF NOT EXISTS application_outbox (notification_id TEXT PRIMARY KEY REFERENCES application_events(notification_id) ON DELETE CASCADE, payload_json TEXT NOT NULL, next_attempt_at REAL NOT NULL, expires_at REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, lease_token TEXT, lease_until REAL, created_at REAL NOT NULL, updated_at REAL NOT NULL)"
+APPLICATION_OUTBOX_INDEX_SQL = "CREATE INDEX IF NOT EXISTS application_outbox_due ON application_outbox (next_attempt_at, expires_at, lease_until)"
 
 SCHEMA_V6_SQL = "\n".join(
     (
@@ -227,7 +231,9 @@ SCHEMA_V6_SQL = "\n".join(
 SCHEMA_V7_SQL = "\n".join((SCHEMA_V6_SQL, OUTBOX_TABLE_SQL, OUTBOX_INDEX_SQL))
 LEGACY_SCHEMA_V7_SQL = SCHEMA_V7_SQL
 LEGACY_SCHEMA_V7_CHECKSUM = hashlib.sha256(LEGACY_SCHEMA_V7_SQL.encode("utf-8")).hexdigest()
-SCHEMA_SQL = "\n".join((SCHEMA_V7_SQL, SUBSCRIPTION_EVENT_PAYLOADS_TABLE_SQL, SUBSCRIPTION_EVENT_PAYLOADS_INDEX_SQL))
+LEGACY_SCHEMA_V7_CURRENT_SQL = "\n".join((SCHEMA_V7_SQL, SUBSCRIPTION_EVENT_PAYLOADS_TABLE_SQL, SUBSCRIPTION_EVENT_PAYLOADS_INDEX_SQL))
+LEGACY_SCHEMA_V7_CURRENT_CHECKSUM = hashlib.sha256(LEGACY_SCHEMA_V7_CURRENT_SQL.encode("utf-8")).hexdigest()
+SCHEMA_SQL = "\n".join((LEGACY_SCHEMA_V7_CURRENT_SQL, APPLICATION_EVENTS_TABLE_SQL, APPLICATION_EVENTS_INDEX_SQL, APPLICATION_OUTBOX_TABLE_SQL, APPLICATION_OUTBOX_INDEX_SQL))
 SCHEMA_CHECKSUM = hashlib.sha256(SCHEMA_SQL.encode("utf-8")).hexdigest()
 
 LEGACY_SCHEMA_V3_SQL = "\n".join(

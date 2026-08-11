@@ -1,7 +1,7 @@
 # Notify Me 初版 Spec
 
-- 状态：Draft 0.5，MVP 与用户订阅已完成；任务名称协调进入实现
-- 日期：2026-08-10
+- 状态：Draft 0.6，增加 trusted local application API
+- 日期：2026-08-11
 - 目标版本：Notify Me 0.2.0
 - 来源基线：Bark Push 当前工作树 0.5.2（含未提交变更）
 - 当前阶段：任务名称协调已对齐并进入实现
@@ -32,6 +32,7 @@ Notify Me 不用 Hook 判断内置风险，也不用 Hook 守门工具或任务�
 6. 保留任务作用域隔离、精确去重、事项升级、解决后再发生、网络失败队列、过期和并发安全。
 7. Onboarding 指导用户在 Bark App 中找到推送地址，并通过不回显、不进入聊天和命令历史的私密输入保存；同时保留最小负载、错误脱敏、HTTPS 和拒绝重定向等安全边界。
 8. 默认使用现有 Codex 插图作为 Bark 自定义图标，保持通知视觉风格。
+9. 允许菜单栏等本机可信程序通过稳定 launcher 发送与 Codex 任务无关的应用级通知。
 
 ### 2.2 非目标
 
@@ -43,6 +44,7 @@ Notify Me 不用 Hook 判断内置风险，也不用 Hook 守门工具或任务�
 6. 不默认推送普通问答、普通进度、可自动恢复的问题或成功完成结果。
 7. 不继承 Bark Push 的任务控制兼容性故障、legacy 0.4.6 bridge 或 Hook 活路径事务恢复。
 8. 0.1.0 不自动读取或迁移 Bark Push 的私密配置和状态库。
+9. 应用级 `push` 不是 Agent `send` 或用户 `subscription` 的替代品；它不接受 Bark URL、device key、level、sound 或任务标题参数，也不新增 Hook 或后台调度器。
 
 ## 3. 用户场景与语义边界
 
@@ -125,7 +127,19 @@ delivery-failed
 - 重复订阅在每个独立 fulfillment event 上创建独立通知，但自身保持 pending，直到用户取消。
 - 订阅、notification、incident generation 和 outbox 的状态迁移必须在同一 SQLite 事务内提交。
 
-### 3.4 条件、优先级与效果解析
+### 3.4 应用级通用 Push
+
+`/Users/mac/.local/bin/notify-me push` 是供本机可信程序调用的稳定 API。调用者必须提供 `source`、`event-id`、P0–P3 `priority`、`title` 和 `body`；不需要 `CODEX_THREAD_ID`，运行时不解析任务标题、项目、Agent 角色或订阅。
+
+- `source` 是 1–64 字符的小写稳定应用标识，允许数字、点、下划线和连字符；`event-id` 是 1–128 字符的稳定事件标识。
+- `source + event-id` 先经本机 salt 做 HMAC，原值不进入 SQLite 或 Bark；同一组合终身幂等，不同 source 相互隔离。
+- P0–P3 均从现有 `priority_effects` 解析。优先级没有有效效果时返回稳定错误 `effect_required`，不得降级到其他优先级；默认 P3 因未配置而拒绝发送。
+- title/body 必须是单行、无 URL、凭证或疑似密钥的文本；调用方不能传 Bark 地址、device key、level、sound、volume、call、TTL、group 或 icon。
+- 首次发送前将不可逆事件与无凭证 payload 原子写入应用级 outbox；可重试失败返回 `queued`，永久失败返回 `failed`，重复调用返回 `deduplicated`。
+- `push-drain [--force]` 只排空应用级 outbox，不要求任务作用域，也不读取或触碰 task-scoped subscription outbox。
+- `accepted` 只证明 Bark 服务接受，返回 `phone_status=unverified`；不证明手机已显示。
+
+### 3.5 条件、优先级与效果解析
 
 三者只存在一条有方向的解析链，避免出现两个互相冲突的效果来源：
 
@@ -236,13 +250,15 @@ P0–P2 的值继承 Bark Push 0.5.2 的稳定默认行为，但在 Notify Me �
 - `archive_ttl_seconds`：仅在强制归档时发给 Bark；
 - `enabled`：该效果是否可选。
 
-固定字段：
+Agent/订阅通知固定字段：
 
 - `group=codex`；
 - `icon=<Notify Me 固定 Codex 图标 URL>`；
 - `id=<不可逆通知 ID>`；
 - 不默认发送 `badge`、`autoCopy`、`copy`、`url`、`image`、`ciphertext`；
 - `call` 默认关闭，避免 30 秒重复铃声造成过度打扰。
+
+应用级通知固定使用 `group=notify-me`，其余固定字段与安全限制相同。
 
 本地投递 TTL 与 Bark 归档 TTL 必须分开建模。Bark 官方的 `ttl` 只影响归档消息保留；不能继续像旧实现一样用一个字段同时表达本地补发时限与远端历史保留。
 
@@ -516,6 +532,10 @@ notify_me.py doctor
 notify_me.py test --priority P1
 notify_me.py runtime install
 
+notify_me.py push --source <stable-source> --event-id <stable-event-id> \
+  --priority P0|P1|P2|P3 --title <text> --body <text>
+notify_me.py push-drain [--force]
+
 notify_me.py subscribe add --summary ... [--repeat] [--priority P2] [--effect-id ...]
 notify_me.py subscribe list
 notify_me.py subscribe cancel --subscription-id ...
@@ -535,7 +555,7 @@ notify_me.py effects list|create|update
 notify_me.py agents-rule plan|commit|verify|remove
 ```
 
-所有机器可消费命令默认输出单行 JSON；错误输出只含稳定分类和脱敏原因。原始任务 ID、Bark 地址、device key、完整用户提示和工具参数不得出现在命令参数、标准输出或数据库。
+所有机器可消费命令默认输出单行 JSON；错误输出只含稳定分类和脱敏原因。原始任务 ID、Bark 地址、device key 和完整用户提示不得出现在标准输出或数据库。应用级 source/event-id 可作为命令参数，但数据库和 Bark 只保存不可逆 HMAC 身份。
 
 ## 11. 建议的代码结构
 
@@ -543,6 +563,7 @@ notify_me.py agents-rule plan|commit|verify|remove
 notify_me/
 ├── .codex-plugin/plugin.json
 ├── notify_me.py                       # 稳定包装入口
+├── notify_me/application_push.py      # 应用级通用 push 与独立 drain
 ├── assets/codex-notify-icon.png
 ├── hooks/
 │   ├── hooks.json                     # UserPromptSubmit + SessionStart(^compact$)

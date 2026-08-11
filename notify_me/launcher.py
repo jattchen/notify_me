@@ -13,6 +13,7 @@ _MAIN = b"from notify_me.cli import main\nraise SystemExit(main())\n"
 _PACKAGE_SOURCES = (
     "__init__.py",
     "activation.py",
+    "application_push.py",
     "cli.py",
     "configuration.py",
     "constants.py",
