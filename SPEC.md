@@ -137,6 +137,7 @@ delivery-failed
 - title/body 必须是单行、无 URL、凭证或疑似密钥的文本；调用方不能传 Bark 地址、device key、level、sound、volume、call、TTL、group 或 icon。
 - 首次发送前将不可逆事件与无凭证 payload 原子写入应用级 outbox；可重试失败返回 `queued`，永久失败返回 `failed`，重复调用返回 `deduplicated`。
 - `push-drain [--force]` 只排空应用级 outbox，不要求任务作用域，也不读取或触碰 task-scoped subscription outbox。
+- `push-cancel --source ... --event-id ...` 只取消同一不可逆身份下、没有投递租约的应用级 outbox 项。取消留下 `failed/cancelled` tombstone 以保持幂等和审计；已接受、永久失败或正在投递的事件只返回 `not_pending`，不得改写历史。该命令不读取 Bark 绑定，也不发网络请求。
 - `accepted` 只证明 Bark 服务接受，返回 `phone_status=unverified`；不证明手机已显示。
 
 ### 3.5 条件、优先级与效果解析
@@ -534,6 +535,7 @@ notify_me.py runtime install
 
 notify_me.py push --source <stable-source> --event-id <stable-event-id> \
   --priority P0|P1|P2|P3 --title <text> --body <text>
+notify_me.py push-cancel --source <stable-source> --event-id <stable-event-id>
 notify_me.py push-drain [--force]
 
 notify_me.py subscribe add --summary ... [--repeat] [--priority P2] [--effect-id ...]

@@ -1802,6 +1802,90 @@ class StateStore:
             connection.close()
         return {"status": "ready", "queued": row[0], "due": row[1], "next_expiry_at": row[2]}
 
+    def cancel_application_event(self, source_key, event_key):
+        """Cancel one unleased application outbox item by its irreversible identity."""
+
+        self._require_database()
+        connection = _connect(self.paths.state_db)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            event = connection.execute(
+                "SELECT notification_id, status, last_error FROM application_events "
+                "WHERE source_key = ? AND event_key = ?",
+                (source_key, event_key),
+            ).fetchone()
+            if event is None:
+                connection.commit()
+                return {"status": "not_found"}
+
+            notification_id, event_status, last_error = event
+            if event_status == "failed" and last_error == "cancelled":
+                connection.commit()
+                return {
+                    "status": "cancelled",
+                    "changed": False,
+                    "notification_id": notification_id,
+                    "previous_status": "cancelled",
+                }
+
+            outbox = connection.execute(
+                "SELECT lease_token FROM application_outbox WHERE notification_id = ?",
+                (notification_id,),
+            ).fetchone()
+            if outbox is None or event_status == "accepted":
+                reason = {
+                    "accepted": "accepted",
+                    "failed": "failed",
+                    "sending": "not_queued",
+                }.get(event_status, "not_queued")
+                connection.commit()
+                return {
+                    "status": "not_pending",
+                    "notification_id": notification_id,
+                    "previous_status": event_status,
+                    "reason": reason,
+                }
+            if outbox[0] is not None:
+                connection.commit()
+                return {
+                    "status": "not_pending",
+                    "notification_id": notification_id,
+                    "previous_status": event_status,
+                    "reason": "in_flight",
+                }
+
+            now = _now()
+            deleted = connection.execute(
+                "DELETE FROM application_outbox "
+                "WHERE notification_id = ? AND lease_token IS NULL",
+                (notification_id,),
+            )
+            if deleted.rowcount != 1:
+                connection.rollback()
+                return {
+                    "status": "not_pending",
+                    "notification_id": notification_id,
+                    "previous_status": event_status,
+                    "reason": "in_flight",
+                }
+            connection.execute(
+                "UPDATE application_events SET status = 'failed', last_error = 'cancelled', "
+                "updated_at = ? WHERE notification_id = ? AND status != 'accepted'",
+                (now, notification_id),
+            )
+            connection.commit()
+            return {
+                "status": "cancelled",
+                "changed": True,
+                "notification_id": notification_id,
+                "previous_status": event_status,
+            }
+        except sqlite3.Error as exc:
+            connection.rollback()
+            raise NotifyMeError("state_write_error", "无法取消应用通知") from exc
+        finally:
+            connection.close()
+
     def claim_application_outbox(self, force=False, lease_seconds=30, db_timeout=2.0):
         self._require_database()
         owner = secrets.token_hex(16)

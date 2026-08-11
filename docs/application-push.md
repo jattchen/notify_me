@@ -33,6 +33,27 @@
 
 `push-drain` 每次最多领取一条到期的应用级 outbox 项；`--force` 忽略下一次尝试时间，但不忽略投递 TTL。它不排空任务订阅 outbox，也不要求 Codex 任务作用域。菜单栏程序可以在自身定时循环中调用它，Notify Me 本身不会创建后台调度器。
 
+## 取消尚未送达的事件
+
+当故障通知仍处于应用级 outbox、监控已经恢复时，使用原始的 `source + event-id` 精确取消：
+
+```sh
+/Users/mac/.local/bin/notify-me push-cancel \
+  --source codex-quota-menu \
+  --event-id monitoring-failure-2026w33
+```
+
+该命令只会删除匹配身份且当前没有投递租约的 `application_outbox` 项。它不会加载 Bark 绑定或发起网络请求，也不会修改 Agent `send`、任务 `subscription`、Hook、其他 source 或其他 event。已经被 Bark 接受、永久失败或正在投递的事件不会被改写成可取消状态。
+
+机器可判定结果：
+
+- `status=cancelled, changed=true`：本次删除了待发项并留下取消 tombstone。
+- `status=cancelled, changed=false`：此前已经取消；这是成功的幂等重复调用。
+- `status=not_pending`：事件已接受、已失败、正在投递或已无队列项；通过 `reason=accepted|failed|in_flight|not_queued` 区分，未发生取消。
+- `status=not_found`：该 `source + event-id` 从未记录。
+
+以上都是 `ok=true` 的业务结果。参数非法、状态库不可用等操作错误返回 `ok=false` 和稳定 `error.code`。
+
 ## 返回状态
 
 - `accepted`：Bark 服务接受；`phone_status` 仍为 `unverified`。

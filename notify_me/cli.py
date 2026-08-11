@@ -15,7 +15,11 @@ from .activation import (
     plan_agents_rule,
     verify_agents_rule,
 )
-from .application_push import drain_application_outbox, push_application
+from .application_push import (
+    cancel_application_push,
+    drain_application_outbox,
+    push_application,
+)
 from .constants import HOOK_MANIFEST
 from .errors import NotifyMeError
 from .configuration import validate_effect
@@ -442,6 +446,22 @@ def _dispatch(argv, env, transport, secret_reader, sleep):
                 _required(options, "source"), _required(options, "event-id"),
                 _required(options, "priority"), _required(options, "title"),
                 _required(options, "body"), sleep=sleep,
+            ),
+        }
+
+    if command == "push-cancel":
+        options = _options(argv[1:])
+        if set(options) != {"source", "event-id"}:
+            raise NotifyMeError(
+                "invalid_arguments", "push-cancel 必须且只能提供 source、event-id"
+            )
+        store.require_initialized()
+        return {
+            "ok": True,
+            **cancel_application_push(
+                store,
+                _required(options, "source"),
+                _required(options, "event-id"),
             ),
         }
 

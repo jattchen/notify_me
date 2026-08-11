@@ -99,6 +99,13 @@ def push_application(store, endpoint, transport, source, event_id, priority, tit
     return _deliver(store, endpoint, transport, claim, priority, sleep)
 
 
+def cancel_application_push(store, source, event_id):
+    """Cancel only this application's queued event, never an active delivery."""
+
+    source_key, event_key, _notification_id = _identity(store, source, event_id)
+    return store.cancel_application_event(source_key, event_key)
+
+
 def drain_application_outbox(store, endpoint, transport, force=False, sleep=None):
     claim = store.claim_application_outbox(force=force)
     if claim["status"] != "claimed":
