@@ -10,10 +10,10 @@ disable-model-invocation: true
 
 ## 未完成的绑定 / 规则
 
-4. 请用户在自己的终端运行 `python3 <插件根>/scripts/notify_me.py setup`。完成标准：`ok=true` 且 `status=bound`，JSON 只有 `host`。
-5. `test --dry-run`，再 `test`。完成标准：后者 `status=accepted`，且用户确认手机出现测试通知。
-6. `agents-rule plan`，把 `block` 原文给用户看。用户同意前不得 commit。
-7. 同意后 `agents-rule commit --authorize`。完成标准：`ok=true`。告诉用户新开一局后规则才生效。
+3. 请用户在自己的终端运行 `python3 <插件根>/scripts/notify_me.py setup`。完成标准：`ok=true` 且 `status=bound`，JSON 只有 `host`。
+4. `test --dry-run`，再 `test`。完成标准：后者 `status=accepted`，且用户确认手机出现测试通知。
+5. `agents-rule plan`，把 `block` 原文给用户看。用户同意前不得 commit。
+6. 同意后 `agents-rule commit --authorize`。完成标准：`ok=true`。告诉用户新开一局后规则才生效。
 
 ## 诊断
 
