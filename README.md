@@ -10,12 +10,13 @@ Grok 卡住或遇到严重风险时，往 iPhone 上的 [Bark](https://bark.day.
 
 插件在 `plugins/notify-me`。入口：`python3 <插件根>/scripts/notify_me.py`。默认插件根是 `~/.grok/plugins/notify-me`。
 
-1. 安装并启用：
+1. 安装并启用。私有仓库用**已登录的 GitHub CLI** 克隆，再从本地装；不要用 `git@` SSH，也不要对私有仓库做无凭证 HTTPS clone（`gh auth login` 不等于 `git clone https://...` 能用）。
    ```bash
-   grok plugin install jattchen/notify_me#plugins/notify-me --trust
+   gh repo clone jattchen/notify_me
+   grok plugin install ./notify_me/plugins/notify-me --trust
    grok plugin enable notify-me
    ```
-   若这条因私有仓库鉴权失败，先 `git clone git@github.com:jattchen/notify_me.git`，再 `grok plugin install ./plugins/notify-me --trust` 和 `grok plugin enable notify-me`。完成标准：`grok plugin list` 含 `notify-me`。
+   若当前目录已有克隆，把 `./notify_me/plugins/notify-me` 换成实际路径。完成标准：`grok plugin list` 含 `notify-me`。
 2. 当前会话应能看到工具 `notify_me__notify_me`。若没有：
    ```bash
    grok mcp add notify_me -- python3 -u ~/.grok/plugins/notify-me/scripts/mcp_server.py
