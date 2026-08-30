@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Notify Me
 
-本实验只接 Grok。Codex / Claude 以后用各自安装器写对应 AGENTS。
+当前只接 Grok。Codex / Claude 以后用各自安装器写对应 AGENTS。
 
 插件根目录是本 `SKILL.md` 的上两级。入口：
 
@@ -18,7 +18,7 @@ Bark 推送 URL 只在用户自己的终端私密输入，不得进入对话、�
 
 ## 安装
 
-1. 确认宿主是 Grok（存在 `~/.grok` 或 `GROK_HOME`）。否则停止并说明本实验不接该宿主。
+1. 确认宿主是 Grok（存在 `~/.grok` 或 `GROK_HOME`）。否则停止并说明当前不接该宿主。
 2. 若已启用旧的 Notify Me 插件或 `config.toml` 里已有 `[mcp_servers.notify_me]`，先停用或删掉，避免两个同名 MCP。
 3. 安装本插件：`grok plugin install <插件根> --trust`，并启用 `notify-me`。若工具未出现，再执行 `grok mcp add notify_me -- python3 -u <插件根>/scripts/mcp_server.py`。完成标准：新会话能看到工具 `notify_me__notify_me`。
 4. 请用户在自己的终端运行 `python3 <插件根>/scripts/notify_me.py setup`（或同目录 `bind-bark.sh`）。完成标准：返回 `ok=true` 且 `status=bound`，JSON 只有 `host`，没有密钥。
@@ -32,4 +32,4 @@ Bark 推送 URL 只在用户自己的终端私密输入，不得进入对话、�
 python3 <插件根>/scripts/notify_me.py doctor
 ```
 
-绑定失败、test 非 `accepted`、MCP 未出现、或 AGENTS 还没有 thin 托管块时走这里。
+绑定失败、test 非 `accepted`、MCP 未出现、或 AGENTS 还没有 Notify Me 托管块时走这里。

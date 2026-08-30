@@ -48,7 +48,7 @@ def _read_line(proc, timeout=1.0):
 
 class McpHandshakeTests(unittest.TestCase):
     def test_initialize_and_minimal_schema(self):
-        home = tempfile.mkdtemp(prefix="thin-notify-me-mcp-")
+        home = tempfile.mkdtemp(prefix="notify-me-mcp-")
         proc = _ndjson_session(home)
         try:
             _send_line(
@@ -89,7 +89,7 @@ class McpHandshakeTests(unittest.TestCase):
             proc.wait(timeout=2)
 
     def test_unknown_op_is_error(self):
-        home = tempfile.mkdtemp(prefix="thin-notify-me-mcp-")
+        home = tempfile.mkdtemp(prefix="notify-me-mcp-")
         proc = _ndjson_session(home)
         try:
             _send_line(

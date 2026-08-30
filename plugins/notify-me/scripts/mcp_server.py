@@ -76,7 +76,7 @@ def serve(deliverer=None):
                     "result": {
                         "protocolVersion": version,
                         "capabilities": {"tools": {"listChanged": False}},
-                        "serverInfo": {"name": "notify_me", "version": "0.1.0"},
+                        "serverInfo": {"name": "notify_me", "version": "1.0.0"},
                     },
                 }
             )

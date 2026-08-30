@@ -3,7 +3,7 @@ import json
 import sys
 
 from .agents_rule import commit as commit_agents
-from .agents_rule import has_thin_block, plan as plan_agents
+from .agents_rule import has_managed_block, plan as plan_agents
 from .bark import BarkEndpoint
 from .binding import Binding
 from .deliver import Deliverer
@@ -63,7 +63,7 @@ def _doctor(deliverer):
         "bound": bool(binding.get("bound")),
         "host": binding.get("host"),
         "agents_md": str(agents),
-        "agents_has_thin": has_thin_block(agents_text),
+        "agents_managed": has_managed_block(agents_text),
     }
 
 

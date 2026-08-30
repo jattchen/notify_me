@@ -6,7 +6,7 @@ from .errors import NotifyMeError
 from .paths import grok_home
 
 
-MANAGED_VERSION = "thin-1"
+MANAGED_VERSION = "2"
 MANAGED_START = "<!-- notify-me:managed:start version={} -->".format(MANAGED_VERSION)
 MANAGED_END = "<!-- notify-me:managed:end -->"
 MANAGED_BODY = (
@@ -86,7 +86,7 @@ def commit(authorize):
     }
 
 
-def has_thin_block(text=None):
+def has_managed_block(text=None):
     if text is None:
         path = agents_path()
         if not path.is_file():
