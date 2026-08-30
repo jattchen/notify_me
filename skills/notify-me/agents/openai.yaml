@@ -1,6 +1,0 @@
-interface:
-  display_name: "Notify Me"
-  short_description: "私密绑定 Bark，为阻塞、风险和当前任务订阅发送可配置 P0–P3 通知"
-  default_prompt: "只在主 Agent 判断任务阻塞、严重风险或当前任务订阅满足时按需调用 Notify Me。"
-policy:
-  allow_implicit_invocation: true
