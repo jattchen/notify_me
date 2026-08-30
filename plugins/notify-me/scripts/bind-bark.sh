@@ -5,4 +5,4 @@ if [[ ! -t 0 || ! -t 1 ]]; then
   exit 1
 fi
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-exec python3 "$ROOT/notify_me.py" setup
+exec python3 "$ROOT/notify_me.py" install

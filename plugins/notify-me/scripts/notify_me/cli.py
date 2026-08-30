@@ -8,6 +8,7 @@ from .bark import BarkEndpoint
 from .binding import Binding
 from .deliver import Deliverer
 from .errors import NotifyMeError
+from .install import run_install
 from .paths import grok_home, state_home
 
 
@@ -43,7 +44,7 @@ def _setup(options):
         if not sys.stdin.isatty():
             raise NotifyMeError(
                 "tty_required",
-                "setup 必须在用户自己的终端私密输入，不要把 Bark URL 发到对话里",
+                "setup 必须在终端里输入 Bark 地址，不要把 URL 发到对话里",
             )
         raw = getpass.getpass("请粘贴 Bark 推送 URL（输入不可见）：")
     endpoint = BarkEndpoint.parse(raw)
@@ -82,9 +83,11 @@ def main(argv=None):
             if sub == "plan":
                 result = plan_agents()
             elif sub == "commit":
-                result = commit_agents(bool(options.get("authorize")))
+                result = commit_agents()
             else:
                 raise NotifyMeError("invalid_arguments", "agents-rule 只支持 plan 或 commit")
+        elif command == "install":
+            result = run_install()
         else:
             options = _options(argv[1:])
             if command == "setup":

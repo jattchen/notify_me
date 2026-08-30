@@ -15,7 +15,6 @@ from notify_me.agents_rule import (  # noqa: E402
     plan,
 )
 from notify_me.cli import main  # noqa: E402
-from notify_me.errors import NotifyMeError  # noqa: E402
 
 
 class AgentsRuleTests(unittest.TestCase):
@@ -34,11 +33,12 @@ class AgentsRuleTests(unittest.TestCase):
         self.assertIn("notify_me__notify_me", result["block"])
         self.assertFalse((Path(self.tmpdir.name) / "AGENTS.md").exists())
 
-    def test_commit_requires_authorize(self):
-        with self.assertRaises(NotifyMeError) as caught:
-            commit(False)
-        self.assertEqual(caught.exception.code, "authorization_required")
-        self.assertFalse((Path(self.tmpdir.name) / "AGENTS.md").exists())
+    def test_commit_writes_without_prompt(self):
+        result = commit()
+        self.assertEqual(result["status"], "committed")
+        path = Path(self.tmpdir.name) / "AGENTS.md"
+        self.assertTrue(path.is_file())
+        self.assertIn(managed_block(), path.read_text(encoding="utf-8"))
 
     def test_commit_replaces_old_managed_block(self):
         path = Path(self.tmpdir.name) / "AGENTS.md"
@@ -46,7 +46,7 @@ class AgentsRuleTests(unittest.TestCase):
             "# 全局\n\n<!-- notify-me:managed:start version=grok-1 -->\nold\n<!-- notify-me:managed:end -->\n",
             encoding="utf-8",
         )
-        result = commit(True)
+        result = commit()
         self.assertEqual(result["status"], "committed")
         self.assertEqual(result["action"], "replaced")
         text = path.read_text(encoding="utf-8")
@@ -65,6 +65,17 @@ class CliTests(unittest.TestCase):
         self.tmpdir.cleanup()
         os.environ.pop("GROK_HOME", None)
         os.environ.pop("GROK_NOTIFY_ME_HOME", None)
+
+    def test_install_without_tty_refuses(self):
+        from io import StringIO
+        from unittest import mock
+
+        buf = StringIO()
+        with mock.patch("sys.stdin.isatty", return_value=False), mock.patch("sys.stdout", buf):
+            code = main(["install"])
+        self.assertEqual(code, 1)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["error"]["code"], "tty_required")
 
     def test_setup_without_tty_refuses(self):
         from io import StringIO

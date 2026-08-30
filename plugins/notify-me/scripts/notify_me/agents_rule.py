@@ -2,7 +2,6 @@ import os
 import re
 import tempfile
 
-from .errors import NotifyMeError
 from .paths import grok_home
 
 
@@ -52,16 +51,10 @@ def plan():
         "target": str(path),
         "action": action,
         "block": managed_block(),
-        "authorize": "把 block 原文给用户看，明确同意后再运行 agents-rule commit --authorize",
     }
 
 
-def commit(authorize):
-    if not authorize:
-        raise NotifyMeError(
-            "authorization_required",
-            "写入 AGENTS 前必须先 plan 并把 block 给用户看，得到同意后再加 --authorize",
-        )
+def commit():
     path = agents_path()
     current = path.read_text(encoding="utf-8") if path.is_file() else ""
     updated, action = _apply(current)

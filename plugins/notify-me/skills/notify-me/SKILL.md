@@ -6,19 +6,20 @@ disable-model-invocation: true
 
 # Notify Me
 
-当前只接 Grok。插件根目录是本 `SKILL.md` 的上两级。入口：`python3 <插件根>/scripts/notify_me.py`。Bark 推送 URL 只在用户自己的终端私密输入，不得进入对话、命令参数或日志。
+当前只接 Grok。Bark 推送 URL 只在终端隐藏输入，不得进入对话、命令参数或日志。
 
-## 未完成的绑定 / 规则
+## 安装
 
-3. 请用户在自己的终端运行 `python3 <插件根>/scripts/notify_me.py setup`。完成标准：`ok=true` 且 `status=bound`，JSON 只有 `host`。
-4. `test --dry-run`，再 `test`。完成标准：后者 `status=accepted`，且用户确认手机出现测试通知。
-5. `agents-rule plan`，把 `block` 原文给用户看。用户同意前不得 commit。
-6. 同意后 `agents-rule commit --authorize`。完成标准：`ok=true`。告诉用户新开一局后规则才生效。
+按仓库 README 的「Agent 安装」：用 osascript **弹出新的「终端」窗口**跑安装命令。用户不必先自己开终端，也不要让用户复制多条命令。完成标准与 README 相同。
+
+未装完时也可在已打开的终端执行：
+
+```text
+python3 ~/.grok/plugins/notify-me/scripts/notify_me.py install
+```
 
 ## 诊断
 
 ```text
-python3 <插件根>/scripts/notify_me.py doctor
+python3 ~/.grok/plugins/notify-me/scripts/notify_me.py doctor
 ```
-
-绑定失败、test 非 `accepted`、MCP 未出现、或 AGENTS 还没有 Notify Me 托管块时走这里。
