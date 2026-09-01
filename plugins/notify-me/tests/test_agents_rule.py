@@ -31,6 +31,12 @@ class AgentsRuleTests(unittest.TestCase):
         self.assertEqual(result["status"], "plan")
         self.assertIn(MANAGED_VERSION, result["block"])
         self.assertIn("notify_me__notify_me", result["block"])
+        self.assertIn("condition=answer", result["block"])
+        self.assertIn("condition=done", result["block"])
+        self.assertIn("等用户去操作", result["block"])
+        self.assertNotIn("要去外部操作", result["block"])
+        self.assertNotIn("终端或浏览器", result["block"])
+        self.assertNotIn("condition=blocking", result["block"])
         self.assertFalse((Path(self.tmpdir.name) / "AGENTS.md").exists())
 
     def test_commit_writes_without_prompt(self):

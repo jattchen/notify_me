@@ -1,6 +1,6 @@
 # Notify Me
 
-Grok 卡住或遇到严重风险时，往 iPhone 上的 [Bark](https://bark.day.app) 推一条短通知。
+Grok 卡住、遇到严重风险、或这一次要的事做完时，往 iPhone 上的 [Bark](https://bark.day.app) 推一条短通知。
 
 **用法：** 把本仓库发给你的 Grok，说「帮我安装 Notify Me」。
 

@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 import sys
 
 ROOT = Path(__file__).resolve().parents[1] / "scripts"
@@ -10,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 from notify_me.bark import BarkEndpoint, TransportResult  # noqa: E402
 from notify_me.binding import Binding  # noqa: E402
-from notify_me.deliver import Deliverer, TOOL_SCHEMA  # noqa: E402
+from notify_me.deliver import Deliverer, TEST_TITLE, TITLE_MARKS, TOOL_SCHEMA  # noqa: E402
 from notify_me.errors import NotifyMeError  # noqa: E402
 
 
@@ -33,6 +34,7 @@ class DeliverTests(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         os.environ["GROK_NOTIFY_ME_HOME"] = self.tmpdir.name
+        os.environ["GROK_WORKSPACE_ROOT"] = self.tmpdir.name
         self.binding = Binding(Path(self.tmpdir.name))
         self.endpoint = BarkEndpoint.parse("https://api.day.app/Abcdefgh1234")
         self.binding.save(self.endpoint)
@@ -42,6 +44,7 @@ class DeliverTests(unittest.TestCase):
     def tearDown(self):
         self.tmpdir.cleanup()
         os.environ.pop("GROK_NOTIFY_ME_HOME", None)
+        os.environ.pop("GROK_WORKSPACE_ROOT", None)
 
     def test_schema_is_minimal(self):
         props = TOOL_SCHEMA["inputSchema"]["properties"]
@@ -49,7 +52,7 @@ class DeliverTests(unittest.TestCase):
         self.assertEqual(TOOL_SCHEMA["inputSchema"]["properties"]["op"]["enum"], ["send", "test"])
         self.assertEqual(
             TOOL_SCHEMA["inputSchema"]["properties"]["condition"]["enum"],
-            ["blocking", "severe-risk"],
+            ["answer", "auth", "action", "severe-risk", "done"],
         )
         dumped = json.dumps(TOOL_SCHEMA)
         self.assertNotIn("bark_url", dumped)
@@ -57,23 +60,25 @@ class DeliverTests(unittest.TestCase):
         self.assertNotIn('"title"', dumped)
         self.assertNotIn("priority", dumped)
 
-    def test_send_blocking_accepted_then_deduplicated(self):
+    def test_send_answer_accepted_then_deduplicated(self):
         first = self.deliverer.send(
             {
-                "condition": "blocking",
+                "condition": "answer",
                 "item_id": "wait-token",
                 "state": "missing",
                 "message": "请提供 API token",
             }
         )
         self.assertEqual(first["status"], "accepted")
-        self.assertEqual(self.transport.payloads[0]["title"], "任务阻塞")
+        self.assertEqual(self.transport.payloads[0]["title"], TITLE_MARKS["answer"])
+        self.assertEqual(self.transport.payloads[0]["body"], "请提供 API token")
+        self.assertEqual(self.transport.payloads[0]["level"], "timeSensitive")
         self.assertNotIn("device_key", first)
         dumped = json.dumps(first)
         self.assertNotIn("Abcdefgh1234", dumped)
         second = self.deliverer.send(
             {
-                "condition": "blocking",
+                "condition": "answer",
                 "item_id": "wait-token",
                 "state": "missing",
                 "message": "请提供 API token",
@@ -96,7 +101,8 @@ class DeliverTests(unittest.TestCase):
             }
         )
         self.assertEqual(first["status"], "failed")
-        self.assertEqual(self.transport.payloads[0]["title"], "严重风险")
+        self.assertEqual(self.transport.payloads[0]["title"], TITLE_MARKS["severe-risk"])
+        self.assertEqual(self.transport.payloads[0]["level"], "critical")
         second = self.deliverer.send(
             {
                 "condition": "severe-risk",
@@ -111,7 +117,7 @@ class DeliverTests(unittest.TestCase):
     def test_dry_run_does_not_post_or_dedup(self):
         result = self.deliverer.send(
             {
-                "condition": "blocking",
+                "condition": "answer",
                 "item_id": "wait-token",
                 "state": "missing",
                 "message": "请提供 API token",
@@ -122,7 +128,7 @@ class DeliverTests(unittest.TestCase):
         self.assertEqual(self.transport.calls, 0)
         accepted = self.deliverer.send(
             {
-                "condition": "blocking",
+                "condition": "answer",
                 "item_id": "wait-token",
                 "state": "missing",
                 "message": "请提供 API token",
@@ -133,7 +139,7 @@ class DeliverTests(unittest.TestCase):
     def test_test_posts_and_skips_send_dedup(self):
         send = self.deliverer.send(
             {
-                "condition": "blocking",
+                "condition": "answer",
                 "item_id": "wait-token",
                 "state": "missing",
                 "message": "请提供 API token",
@@ -142,6 +148,7 @@ class DeliverTests(unittest.TestCase):
         self.assertEqual(send["status"], "accepted")
         tested = self.deliverer.test({"message": "测试"})
         self.assertEqual(tested["status"], "accepted")
+        self.assertEqual(self.transport.payloads[1]["title"], TEST_TITLE)
         self.assertEqual(self.transport.calls, 2)
         again = self.deliverer.test({})
         self.assertEqual(again["status"], "accepted")
@@ -150,6 +157,7 @@ class DeliverTests(unittest.TestCase):
     def test_test_dry_run_does_not_post(self):
         result = self.deliverer.test({"dry_run": True})
         self.assertEqual(result["status"], "dry_run")
+        self.assertEqual(result["title"], TEST_TITLE)
         self.assertEqual(self.transport.calls, 0)
 
     def test_unknown_op_and_condition(self):
@@ -166,13 +174,23 @@ class DeliverTests(unittest.TestCase):
                 }
             )
         self.assertEqual(caught.exception.code, "unsupported_condition")
+        with self.assertRaises(NotifyMeError) as caught:
+            self.deliverer.send(
+                {
+                    "condition": "blocking",
+                    "item_id": "a",
+                    "state": "b",
+                    "message": "x",
+                }
+            )
+        self.assertEqual(caught.exception.code, "unsupported_condition")
 
-    def test_project_name_appended_for_git_root(self):
+    def test_git_project_goes_in_title_not_body(self):
         repo = Path(self.tmpdir.name) / "demo-proj"
         (repo / ".git").mkdir(parents=True)
         result = self.deliverer.send(
             {
-                "condition": "blocking",
+                "condition": "answer",
                 "item_id": "wait-token",
                 "state": "missing",
                 "message": "请提供 API token",
@@ -180,4 +198,56 @@ class DeliverTests(unittest.TestCase):
             },
             {"GROK_WORKSPACE_ROOT": str(repo)},
         )
-        self.assertTrue(result["body"].endswith("（demo-proj）"))
+        self.assertEqual(result["title"], "{} · {}".format(TITLE_MARKS["answer"], "demo-proj"))
+        self.assertEqual(result["body"], "请提供 API token")
+        self.assertNotIn("demo-proj", result["body"])
+
+    def test_stale_home_pwd_does_not_hide_git_cwd(self):
+        repo = Path(self.tmpdir.name) / "demo-proj"
+        (repo / ".git").mkdir(parents=True)
+        with mock.patch("notify_me.deliver.os.getcwd", return_value=str(repo)):
+            result = self.deliverer.send(
+                {
+                    "condition": "answer",
+                    "item_id": "wait-token",
+                    "state": "missing",
+                    "message": "请提供 API token",
+                    "dry_run": True,
+                },
+                {"PWD": str(Path.home())},
+            )
+        self.assertEqual(result["title"], "{} · {}".format(TITLE_MARKS["answer"], "demo-proj"))
+        self.assertEqual(result["body"], "请提供 API token")
+
+    def test_titles_and_effects_by_condition(self):
+        expected_levels = {
+            "answer": "timeSensitive",
+            "auth": "timeSensitive",
+            "action": "timeSensitive",
+            "severe-risk": "critical",
+            "done": "active",
+        }
+        for condition, mark in TITLE_MARKS.items():
+            result = self.deliverer.send(
+                {
+                    "condition": condition,
+                    "item_id": "item-{}".format(condition),
+                    "state": "open",
+                    "message": "正文",
+                    "dry_run": True,
+                }
+            )
+            self.assertEqual(result["title"], mark)
+            self.assertEqual(result["body"], "正文")
+            posted = self.deliverer.send(
+                {
+                    "condition": condition,
+                    "item_id": "post-{}".format(condition),
+                    "state": "open",
+                    "message": "正文",
+                }
+            )
+            self.assertEqual(posted["status"], "accepted")
+            payload = self.transport.payloads[-1]
+            self.assertEqual(payload["title"], mark)
+            self.assertEqual(payload["level"], expected_levels[condition])

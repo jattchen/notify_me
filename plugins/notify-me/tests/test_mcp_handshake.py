@@ -77,6 +77,10 @@ class McpHandshakeTests(unittest.TestCase):
             props = tool["inputSchema"]["properties"]
             self.assertEqual(set(props), {"op", "condition", "item_id", "state", "message", "dry_run"})
             self.assertEqual(props["op"]["enum"], ["send", "test"])
+            self.assertEqual(
+                props["condition"]["enum"],
+                ["answer", "auth", "action", "severe-risk", "done"],
+            )
             dumped = json.dumps(tool)
             self.assertNotIn("subscribe", dumped)
             self.assertNotIn("bark_url", dumped)

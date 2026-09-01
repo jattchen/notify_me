@@ -5,13 +5,15 @@ import tempfile
 from .paths import grok_home
 
 
-MANAGED_VERSION = "2"
+MANAGED_VERSION = "5"
 MANAGED_START = "<!-- notify-me:managed:start version={} -->".format(MANAGED_VERSION)
 MANAGED_END = "<!-- notify-me:managed:end -->"
 MANAGED_BODY = (
-    "仅主 Agent 调用 notify_me__notify_me：等用户（缺信息/授权/选择/外部操作）且主线停住"
-    " → condition=blocking；继续可能灾难性或大范围不可逆 → condition=severe-risk。\n"
-    "未命中不发。仅 status=accepted 可称已推送。"
+    "仅主 Agent 调用 notify_me__notify_me：等用户且主线停住 → 缺信息/选择 condition=answer；"
+    "等用户授权 condition=auth；等用户去操作 condition=action。"
+    "继续可能灾难性或大范围不可逆 → condition=severe-risk。"
+    "用户这一次要的事整件做完 → condition=done。\n"
+    "未命中不发。中间步骤不发 done。仅 status=accepted 可称已推送。"
 )
 MANAGED_BLOCK_RE = re.compile(
     r"<!-- notify-me:managed:start version=.*?-->.*?<!-- notify-me:managed:end -->",

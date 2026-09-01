@@ -8,18 +8,28 @@ from .errors import NotifyMeError
 
 TOOL_NAME = "notify_me"
 TOOL_DESCRIPTION = (
-    "Main agent: send blocking|severe-risk; test verifies Bark. Never pass Bark URLs."
+    "Main agent: send answer|auth|action|severe-risk|done; test verifies Bark. "
+    "Never pass Bark URLs."
 )
 OPS = ("send", "test")
-SENDABLE = ("blocking", "severe-risk")
-CONDITION_TITLES = {
-    "blocking": "任务阻塞",
-    "severe-risk": "严重风险",
+SENDABLE = ("answer", "auth", "action", "severe-risk", "done")
+WAITING_EFFECT = {"level": "timeSensitive", "sound": "telegraph"}
+QUIET_EFFECT = {"level": "active", "sound": "glass"}
+TITLE_MARKS = {
+    "answer": "💬 待回答",
+    "auth": "🔐 待授权",
+    "action": "🖐️ 待操作",
+    "severe-risk": "🛑 先停下",
+    "done": "✅ 已完成",
 }
+TEST_TITLE = "🔔 已接通"
 EFFECTS = {
-    "blocking": {"level": "timeSensitive", "sound": "telegraph"},
+    "answer": WAITING_EFFECT,
+    "auth": WAITING_EFFECT,
+    "action": WAITING_EFFECT,
     "severe-risk": {"level": "critical", "sound": "alarm", "volume": 8},
-    "test": {"level": "active", "sound": "glass"},
+    "done": QUIET_EFFECT,
+    "test": QUIET_EFFECT,
 }
 DEFAULT_BARK_ICON_URL = (
     "https://cdn.jsdelivr.net/gh/jattchen/grok-build-bark-icon@main/grok-build-icon.png"
@@ -38,7 +48,13 @@ TOOL_SCHEMA = {
             "condition": {
                 "type": "string",
                 "enum": list(SENDABLE),
-                "description": "Required for send.",
+                "description": (
+                    "Required for send. answer: need a reply or choice. "
+                    "auth: need permission or token. "
+                    "action: user must act outside chat. "
+                    "severe-risk: continuing is irreversible. "
+                    "done: the user's full request is finished, not a substep."
+                ),
             },
             "item_id": {
                 "type": "string",
@@ -72,14 +88,13 @@ def _required(params, name):
     return value.strip()
 
 
-def project_name(env=None):
-    env = env or os.environ
-    raw = env.get("GROK_WORKSPACE_ROOT") or env.get("PWD") or os.getcwd()
+def _git_root_name(start, home):
+    if not start:
+        return None
     try:
-        path = Path(raw).expanduser().resolve()
+        path = Path(start).expanduser().resolve()
     except OSError:
         return None
-    home = Path.home().resolve()
     if path == home:
         return None
     current = path
@@ -87,16 +102,31 @@ def project_name(env=None):
         if (current / ".git").exists() and current != home:
             return current.name
         if current.parent == current:
-            break
+            return None
         current = current.parent
-    return None
 
 
-def _compose_body(message, env):
+def project_name(env=None):
+    env = env or os.environ
+    home = Path.home().resolve()
+    explicit = env.get("GROK_WORKSPACE_ROOT") or env.get("CLAUDE_PROJECT_DIR")
+    if explicit:
+        return _git_root_name(explicit, home)
+    try:
+        from_cwd = _git_root_name(os.getcwd(), home)
+    except OSError:
+        from_cwd = None
+    if from_cwd:
+        return from_cwd
+    return _git_root_name(env.get("PWD"), home)
+
+
+def _compose_title(condition, env=None):
+    mark = TITLE_MARKS[condition]
     project = project_name(env)
     if project:
-        return "{}（{}）".format(message, project)
-    return message
+        return "{} · {}".format(mark, project)
+    return mark
 
 
 def _build_payload(endpoint, title, body, effect):
@@ -134,7 +164,10 @@ class Deliverer:
     def send(self, params, env=None):
         condition = (params or {}).get("condition")
         if condition not in SENDABLE:
-            raise NotifyMeError("unsupported_condition", "send 只接受 blocking 或 severe-risk")
+            raise NotifyMeError(
+                "unsupported_condition",
+                "send 只接受 answer、auth、action、severe-risk 或 done",
+            )
         item_id = _required(params, "item_id")
         state = _required(params, "state")
         message = _required(params, "message")
@@ -147,8 +180,8 @@ class Deliverer:
                 "item_id": item_id,
                 "state": state,
             }
-        title = CONDITION_TITLES[condition]
-        body = _compose_body(message, env)
+        title = _compose_title(condition, env)
+        body = message
         effect = EFFECTS[condition]
         if dry_run:
             return {
@@ -191,7 +224,7 @@ class Deliverer:
             raise NotifyMeError("invalid_arguments", "message 必须是字符串")
         else:
             message = message.strip()
-        title = "Grok Notify Me"
+        title = TEST_TITLE
         effect = EFFECTS["test"]
         if dry_run:
             return {
