@@ -129,12 +129,12 @@ def _compose_title(condition, env=None):
     return mark
 
 
-def _build_payload(endpoint, title, body, effect):
+def _build_payload(endpoint, title, body, effect, group="Grok"):
     payload = {
         "device_key": endpoint.key,
         "title": title,
         "body": body,
-        "group": "Grok",
+        "group": group,
         "icon": DEFAULT_BARK_ICON_URL,
     }
     if effect.get("level"):
@@ -183,6 +183,7 @@ class Deliverer:
         title = _compose_title(condition, env)
         body = message
         effect = EFFECTS[condition]
+        group = project_name(env) or "Grok"
         if dry_run:
             return {
                 "ok": True,
@@ -194,7 +195,7 @@ class Deliverer:
                 "body": body,
             }
         endpoint = self.binding.load()
-        payload = _build_payload(endpoint, title, body, effect)
+        payload = _build_payload(endpoint, title, body, effect, group=group)
         result = self.transport.send_with_retry(endpoint, payload)
         if result.accepted:
             self._accepted.add(key)
