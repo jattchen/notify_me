@@ -27,7 +27,9 @@ def _say(message):
 
 
 def _require_tty():
-    if not sys.stdin.isatty() or not sys.stdout.isatty():
+    # Piped stdin is not a TTY; getpass can still read Bark URL from /dev/tty.
+    isatty = getattr(sys.stdout, "isatty", None)
+    if not callable(isatty) or not isatty():
         raise NotifyMeError(
             "tty_required",
             "请在 macOS「终端」里运行安装，以便输入 Bark 地址。Agent 应弹出终端窗口执行安装命令，不要在无 TTY 的工具调用里跑。",
