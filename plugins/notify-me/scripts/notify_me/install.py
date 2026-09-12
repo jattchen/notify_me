@@ -10,6 +10,7 @@ from .bark import BarkEndpoint
 from .binding import Binding
 from .deliver import Deliverer
 from .errors import NotifyMeError
+from .paths import installed_plugin_root
 
 
 REPO = "jattchen/notify_me"
@@ -18,10 +19,6 @@ GITHUB_PLUGIN = "jattchen/notify_me#plugins/notify-me"
 
 def plugin_root():
     return Path(__file__).resolve().parents[2]
-
-
-def installed_plugin_root():
-    return Path.home() / ".grok" / "plugins" / "notify-me"
 
 
 def _say(message):
@@ -54,7 +51,7 @@ def _ensure_plugin():
     if (source / "plugin.json").is_file():
         _run(["grok", "plugin", "install", str(source), "--trust"], check=False)
     dest = installed_plugin_root()
-    if not (dest / "scripts" / "notify_me.py").is_file():
+    if dest is None:
         remote = _run(
             ["grok", "plugin", "install", GITHUB_PLUGIN, "--trust"],
             check=False,
@@ -72,8 +69,11 @@ def _ensure_plugin():
             )
     _run(["grok", "plugin", "enable", "notify-me"], check=False)
     dest = installed_plugin_root()
-    if not (dest / "scripts" / "notify_me.py").is_file():
-        raise NotifyMeError("plugin_install_failed", "插件安装后未找到 {}".format(dest))
+    if dest is None:
+        raise NotifyMeError(
+            "plugin_install_failed",
+            "插件安装后未找到 ~/.grok/installed-plugins/notify-me-*",
+        )
     return dest
 
 

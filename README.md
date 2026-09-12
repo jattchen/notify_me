@@ -48,4 +48,4 @@ gh api repos/jattchen/notify_me/contents/install.sh -H "Accept: application/vnd.
 curl -fsSL https://raw.githubusercontent.com/jattchen/notify_me/main/install.sh | bash
 ```
 
-诊断：`python3 ~/.grok/plugins/notify-me/scripts/notify_me.py doctor`
+诊断：`python3 ~/.grok/installed-plugins/notify-me-*/scripts/notify_me.py doctor`
