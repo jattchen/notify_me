@@ -34,7 +34,7 @@ class DeliverTests(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         os.environ["GROK_NOTIFY_ME_HOME"] = self.tmpdir.name
-        os.environ["GROK_WORKSPACE_ROOT"] = self.tmpdir.name
+        os.environ["GROK_WORKSPACE_ROOT"] = str(Path.home())
         self.binding = Binding(Path(self.tmpdir.name))
         self.endpoint = BarkEndpoint.parse("https://api.day.app/Abcdefgh1234")
         self.binding.save(self.endpoint)
@@ -220,18 +220,80 @@ class DeliverTests(unittest.TestCase):
         self.assertEqual(payload["title"], "{} · {}".format(TITLE_MARKS["answer"], "demo-proj"))
         self.assertEqual(payload["body"], "请提供 API token")
 
-    def test_send_without_git_project_keeps_grok_group(self):
+    def test_nongit_workspace_uses_directory_name(self):
+        workspace = Path(self.tmpdir.name) / "loopx"
+        workspace.mkdir()
         result = self.deliverer.send(
             {
                 "condition": "answer",
                 "item_id": "wait-token",
                 "state": "missing",
                 "message": "请提供 API token",
-            }
+            },
+            {"GROK_WORKSPACE_ROOT": str(workspace)},
+        )
+        self.assertEqual(result["status"], "accepted")
+        payload = self.transport.payloads[0]
+        self.assertEqual(payload["group"], "loopx")
+        self.assertEqual(
+            payload["title"], "{} · {}".format(TITLE_MARKS["answer"], "loopx")
+        )
+        self.assertEqual(payload["body"], "请提供 API token")
+
+    def test_home_directory_is_not_used_as_project_name(self):
+        result = self.deliverer.send(
+            {
+                "condition": "answer",
+                "item_id": "wait-token",
+                "state": "missing",
+                "message": "请提供 API token",
+            },
+            {"GROK_WORKSPACE_ROOT": str(Path.home())},
         )
         self.assertEqual(result["status"], "accepted")
         self.assertEqual(self.transport.payloads[0]["group"], "Grok")
         self.assertEqual(self.transport.payloads[0]["title"], TITLE_MARKS["answer"])
+
+    def test_nongit_cwd_uses_directory_name(self):
+        workspace = Path(self.tmpdir.name) / "loopx"
+        workspace.mkdir()
+        with mock.patch("notify_me.deliver.os.getcwd", return_value=str(workspace)):
+            result = self.deliverer.send(
+                {
+                    "condition": "answer",
+                    "item_id": "wait-token",
+                    "state": "missing",
+                    "message": "请提供 API token",
+                },
+                {"PWD": str(Path.home())},
+            )
+        self.assertEqual(result["status"], "accepted")
+        payload = self.transport.payloads[0]
+        self.assertEqual(payload["group"], "loopx")
+        self.assertEqual(
+            payload["title"], "{} · {}".format(TITLE_MARKS["answer"], "loopx")
+        )
+
+    def test_git_root_preferred_over_workspace_basename(self):
+        repo = Path(self.tmpdir.name) / "demo-proj"
+        nested = repo / "src"
+        (repo / ".git").mkdir(parents=True)
+        nested.mkdir()
+        result = self.deliverer.send(
+            {
+                "condition": "answer",
+                "item_id": "wait-token",
+                "state": "missing",
+                "message": "请提供 API token",
+            },
+            {"GROK_WORKSPACE_ROOT": str(nested)},
+        )
+        self.assertEqual(result["status"], "accepted")
+        payload = self.transport.payloads[0]
+        self.assertEqual(payload["group"], "demo-proj")
+        self.assertEqual(
+            payload["title"], "{} · {}".format(TITLE_MARKS["answer"], "demo-proj")
+        )
 
     def test_same_project_tasks_share_bark_group(self):
         repo = Path(self.tmpdir.name) / "demo-proj"
