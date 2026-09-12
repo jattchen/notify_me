@@ -88,14 +88,18 @@ def _required(params, name):
     return value.strip()
 
 
-def _git_root_name(start, home):
+def _resolved_path(start):
     if not start:
         return None
     try:
-        path = Path(start).expanduser().resolve()
+        return Path(start).expanduser().resolve()
     except OSError:
         return None
-    if path == home:
+
+
+def _git_root_name(start, home):
+    path = _resolved_path(start)
+    if path is None or path == home:
         return None
     current = path
     while True:
@@ -106,19 +110,36 @@ def _git_root_name(start, home):
         current = current.parent
 
 
+def _directory_name(start, home):
+    path = _resolved_path(start)
+    if path is None or path == home:
+        return None
+    try:
+        if not path.is_dir():
+            return None
+    except OSError:
+        return None
+    return path.name or None
+
+
+def _project_from(start, home):
+    return _git_root_name(start, home) or _directory_name(start, home)
+
+
 def project_name(env=None):
     env = env or os.environ
     home = Path.home().resolve()
     explicit = env.get("GROK_WORKSPACE_ROOT") or env.get("CLAUDE_PROJECT_DIR")
     if explicit:
-        return _git_root_name(explicit, home)
+        return _project_from(explicit, home)
     try:
-        from_cwd = _git_root_name(os.getcwd(), home)
+        cwd = os.getcwd()
     except OSError:
-        from_cwd = None
+        cwd = None
+    from_cwd = _project_from(cwd, home)
     if from_cwd:
         return from_cwd
-    return _git_root_name(env.get("PWD"), home)
+    return _project_from(env.get("PWD"), home)
 
 
 def _compose_title(condition, env=None):
