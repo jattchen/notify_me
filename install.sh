@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ ! -t 0 || ! -t 1 ]]; then
+need_terminal() {
   echo "请在 macOS「终端」里运行，以便输入 Bark 地址。" >&2
   echo "Agent 应弹出一个新的终端窗口来执行本脚本，用户不必先自己开终端。" >&2
   exit 1
+}
+
+install_notify_me() {
+if [[ ! -t 0 || ! -t 1 ]]; then
+  need_terminal
 fi
 
 if grok plugin install jattchen/notify_me#plugins/notify-me --trust; then
@@ -102,3 +107,13 @@ if ! grok mcp list 2>/dev/null | grep -q notify_me; then
 fi
 
 exec python3 "$plugin/scripts/notify_me.py" install
+}
+
+# 文档安装是 `curl | bash` / `gh api | bash`，stdin 是管道而不是终端。
+# 函数体已经解析完，才能把 stdin 接到当前「终端」。
+if [[ ! -t 0 ]]; then
+  ( : </dev/tty ) 2>/dev/null || need_terminal
+  install_notify_me </dev/tty
+else
+  install_notify_me
+fi
