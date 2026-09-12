@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ ! -t 0 || ! -t 1 ]]; then
+# Piped stdin is not a TTY; a real Terminal still has stdout TTY.
+if [[ ! -t 1 ]]; then
   echo "请在 macOS「终端」里运行，以便输入 Bark 地址。" >&2
   echo "Agent 应弹出一个新的终端窗口来执行本脚本，用户不必先自己开终端。" >&2
   exit 1
@@ -101,4 +102,5 @@ if ! grok mcp list 2>/dev/null | grep -q notify_me; then
   grok mcp add notify_me -- python3 -u "$plugin/scripts/mcp_server.py"
 fi
 
-exec python3 "$plugin/scripts/notify_me.py" install
+# Do not inherit the install script pipe; getpass needs a real terminal.
+exec python3 "$plugin/scripts/notify_me.py" install </dev/tty
