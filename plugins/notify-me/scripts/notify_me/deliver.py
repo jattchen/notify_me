@@ -193,7 +193,7 @@ class Deliverer:
         state = _required(params, "state")
         message = _required(params, "message")
         dry_run = bool((params or {}).get("dry_run"))
-        key = (item_id, state)
+        key = (item_id, state, condition)
         if key in self._accepted:
             return {
                 "ok": True,
