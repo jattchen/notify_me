@@ -87,6 +87,39 @@ class DeliverTests(unittest.TestCase):
         self.assertEqual(second["status"], "deduplicated")
         self.assertEqual(self.transport.calls, 1)
 
+    def test_answer_then_done_same_incident_both_accepted(self):
+        first = self.deliverer.send(
+            {
+                "condition": "answer",
+                "item_id": "task-1",
+                "state": "open",
+                "message": "请选择下一步",
+            }
+        )
+        second = self.deliverer.send(
+            {
+                "condition": "done",
+                "item_id": "task-1",
+                "state": "open",
+                "message": "任务已完成",
+            }
+        )
+        self.assertEqual(first["status"], "accepted")
+        self.assertEqual(second["status"], "accepted")
+        self.assertEqual(self.transport.calls, 2)
+        self.assertEqual(self.transport.payloads[0]["title"], TITLE_MARKS["answer"])
+        self.assertEqual(self.transport.payloads[1]["title"], TITLE_MARKS["done"])
+        retry = self.deliverer.send(
+            {
+                "condition": "done",
+                "item_id": "task-1",
+                "state": "open",
+                "message": "任务已完成",
+            }
+        )
+        self.assertEqual(retry["status"], "deduplicated")
+        self.assertEqual(self.transport.calls, 2)
+
     def test_failed_send_can_retry(self):
         self.transport.results = [
             TransportResult(False, True, "network_error", None, 2),
