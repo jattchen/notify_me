@@ -7,6 +7,8 @@ from .errors import NotifyMeError
 
 
 TOOL_NAME = "notify_me"
+CURRENT_TOOL_NAME = "notifyme"
+TOOL_NAMES = (TOOL_NAME, CURRENT_TOOL_NAME)
 TOOL_DESCRIPTION = (
     "Main agent: send answer|auth|action|severe-risk|done; test verifies Bark. "
     "Never pass Bark URLs."
