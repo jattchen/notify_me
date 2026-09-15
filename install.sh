@@ -8,7 +8,7 @@ if [[ ! -t 1 ]]; then
   exit 1
 fi
 
-if grok plugin install jattchen/notify_me#plugins/notify-me --trust; then
+if grok plugin install jattchen/notifyme#plugins/notify-me --trust; then
   true
 else
   if ! command -v gh >/dev/null 2>&1; then
@@ -16,7 +16,7 @@ else
     exit 1
   fi
   tmp="$(mktemp -d)"
-  gh repo clone jattchen/notify_me "$tmp/src"
+  gh repo clone jattchen/notifyme "$tmp/src"
   grok plugin install "$tmp/src/plugins/notify-me" --trust
 fi
 

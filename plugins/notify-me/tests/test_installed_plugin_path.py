@@ -16,6 +16,8 @@ from notify_me.paths import installed_plugin_root  # noqa: E402
 DOCUMENTED_SCRIPT = "~/.grok/installed-plugins/notify-me-*/scripts/notify_me.py"
 HARDCODED_HASH = "notify-me-b47b0296"
 LEGACY_PLUGIN = "~/.grok/plugins/notify-me"
+GITHUB_REPO = "jattchen/notifyme"
+LEGACY_GITHUB_REPO = "jattchen/notify_me"
 
 
 def _make_plugin(installed, name, mtime=None):
@@ -167,6 +169,20 @@ class InstalledPluginRootTests(unittest.TestCase):
         found = installed_plugin_root(self.home)
         self.assertEqual(found, plugin)
         self.assertNotIn("b47b0296", str(found))
+
+
+class GitHubRepoNameTests(unittest.TestCase):
+    def test_install_entrypoints_use_notifyme_repo(self):
+        readme = (REPO / "README.md").read_text(encoding="utf-8")
+        install_sh = (REPO / "install.sh").read_text(encoding="utf-8")
+        install_py = (SCRIPTS / "notify_me" / "install.py").read_text(encoding="utf-8")
+        for text, label in (
+            (readme, "README.md"),
+            (install_sh, "install.sh"),
+            (install_py, "install.py"),
+        ):
+            self.assertIn(GITHUB_REPO, text, label)
+            self.assertNotIn(LEGACY_GITHUB_REPO, text, label)
 
 
 class DocumentedCommandTests(unittest.TestCase):

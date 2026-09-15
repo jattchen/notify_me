@@ -13,8 +13,8 @@ from .errors import NotifyMeError
 from .paths import installed_plugin_root
 
 
-REPO = "jattchen/notify_me"
-GITHUB_PLUGIN = "jattchen/notify_me#plugins/notify-me"
+REPO = "jattchen/notifyme"
+GITHUB_PLUGIN = "jattchen/notifyme#plugins/notify-me"
 
 
 def plugin_root():

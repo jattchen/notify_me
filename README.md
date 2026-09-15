@@ -16,7 +16,7 @@ Grok 卡住、遇到严重风险、或这一次要的事做完时，往 iPhone �
 osascript <<'EOF'
 tell application "Terminal"
   activate
-  do script "bash -lc 'gh api repos/jattchen/notify_me/contents/install.sh -H \"Accept: application/vnd.github.raw\" | bash'"
+  do script "bash -lc 'gh api repos/jattchen/notifyme/contents/install.sh -H \"Accept: application/vnd.github.raw\" | bash'"
 end tell
 EOF
 ```
@@ -27,7 +27,7 @@ EOF
 osascript <<'EOF'
 tell application "Terminal"
   activate
-  do script "bash -lc 'curl -fsSL https://raw.githubusercontent.com/jattchen/notify_me/main/install.sh | bash'"
+  do script "bash -lc 'curl -fsSL https://raw.githubusercontent.com/jattchen/notifyme/main/install.sh | bash'"
 end tell
 EOF
 ```
@@ -39,13 +39,13 @@ EOF
 在已经打开的终端里执行同一套安装：
 
 ```bash
-gh api repos/jattchen/notify_me/contents/install.sh -H "Accept: application/vnd.github.raw" | bash
+gh api repos/jattchen/notifyme/contents/install.sh -H "Accept: application/vnd.github.raw" | bash
 ```
 
 公开后：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jattchen/notify_me/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jattchen/notifyme/main/install.sh | bash
 ```
 
 诊断：`python3 ~/.grok/installed-plugins/notify-me-*/scripts/notify_me.py doctor`
