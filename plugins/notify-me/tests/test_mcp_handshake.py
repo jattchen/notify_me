@@ -10,11 +10,14 @@ import subprocess
 SERVER = Path(__file__).resolve().parents[1] / "scripts" / "mcp_server.py"
 
 
-def _ndjson_session(home):
+def _ndjson_session(home, extra_args=None):
     env = os.environ.copy()
     env["GROK_NOTIFY_ME_HOME"] = home
+    command = ["python3", "-u", str(SERVER)]
+    if extra_args:
+        command.extend(extra_args)
     proc = subprocess.Popen(
-        ["python3", "-u", str(SERVER)],
+        command,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -114,6 +117,79 @@ class McpHandshakeTests(unittest.TestCase):
                     "id": 2,
                     "method": "tools/call",
                     "params": {"name": "notify_me", "arguments": {"op": "status"}},
+                },
+            )
+            reply = _read_line(proc)
+            payload = json.loads(reply["result"]["content"][0]["text"])
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["error"]["code"], "unsupported_command")
+            self.assertTrue(reply["result"]["isError"])
+        finally:
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                if stream:
+                    stream.close()
+            proc.kill()
+            proc.wait(timeout=2)
+
+    def test_name_flag_advertises_notifyme_only(self):
+        home = tempfile.mkdtemp(prefix="notify-me-mcp-")
+        proc = _ndjson_session(home, ["--name", "notifyme"])
+        try:
+            _send_line(
+                proc,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-03-26",
+                        "capabilities": {},
+                        "clientInfo": {"name": "repro", "version": "0"},
+                    },
+                },
+            )
+            message = _read_line(proc)
+            self.assertEqual(message["result"]["serverInfo"]["name"], "notifyme")
+            _send_line(proc, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+            _send_line(proc, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+            listed = _read_line(proc)
+            tools = listed["result"]["tools"]
+            self.assertEqual([tool["name"] for tool in tools], ["notifyme"])
+            props = tools[0]["inputSchema"]["properties"]
+            self.assertEqual(set(props), {"op", "condition", "item_id", "state", "message", "dry_run"})
+        finally:
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                if stream:
+                    stream.close()
+            proc.kill()
+            proc.wait(timeout=2)
+
+    def test_notifyme_tool_call_matches_notify_me(self):
+        home = tempfile.mkdtemp(prefix="notify-me-mcp-")
+        proc = _ndjson_session(home, ["--name", "notifyme"])
+        try:
+            _send_line(
+                proc,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-03-26",
+                        "capabilities": {},
+                        "clientInfo": {"name": "t", "version": "0"},
+                    },
+                },
+            )
+            _read_line(proc)
+            _send_line(proc, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+            _send_line(
+                proc,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {"name": "notifyme", "arguments": {"op": "status"}},
                 },
             )
             reply = _read_line(proc)

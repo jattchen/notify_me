@@ -3,6 +3,10 @@
     "notify_me": {
       "command": "python3",
       "args": ["-u", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_server.py"]
+    },
+    "notifyme": {
+      "command": "python3",
+      "args": ["-u", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_server.py", "--name", "notifyme"]
     }
   }
 }

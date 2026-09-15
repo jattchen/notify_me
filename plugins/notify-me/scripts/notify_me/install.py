@@ -79,13 +79,34 @@ def _ensure_plugin():
     return dest
 
 
+def _mcp_listed(text, name):
+    prefix = name + ":"
+    for line in (text or "").splitlines():
+        if line.strip().startswith(prefix):
+            return True
+    return False
+
+
 def _ensure_mcp(plugin_dir):
     listed = _run(["grok", "mcp", "list"], check=False)
     text = (listed.stdout or "") + (listed.stderr or "")
-    if "notify_me" in text:
-        return
     server = plugin_dir / "scripts" / "mcp_server.py"
-    _run(["grok", "mcp", "add", "notify_me", "--", "python3", "-u", str(server)])
+    if not _mcp_listed(text, "notify_me"):
+        _run(["grok", "mcp", "add", "notify_me", "--", "python3", "-u", str(server)])
+    if not _mcp_listed(text, "notifyme"):
+        _run(
+            [
+                "grok",
+                "mcp",
+                "add",
+                "notifyme",
+                "--",
+                "python3",
+                "-u",
+                str(server),
+                "--name", "notifyme",
+            ]
+        )
 
 
 def run_install():

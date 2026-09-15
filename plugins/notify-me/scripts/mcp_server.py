@@ -10,11 +10,32 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from notify_me.deliver import TOOL_NAME, TOOL_SCHEMA, Deliverer  # noqa: E402
+from notify_me.deliver import TOOL_NAME, TOOL_NAMES, TOOL_SCHEMA, Deliverer  # noqa: E402
 from notify_me.errors import NotifyMeError  # noqa: E402
 
 
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
+
+
+def advertised_tool_name(argv=None):
+    tokens = sys.argv[1:] if argv is None else list(argv)
+    name = TOOL_NAME
+    index = 0
+    while index < len(tokens):
+        if tokens[index] == "--name" and index + 1 < len(tokens):
+            name = tokens[index + 1]
+            index += 2
+            continue
+        index += 1
+    if name not in TOOL_NAMES:
+        return TOOL_NAME
+    return name
+
+
+def _tool_schema(name):
+    schema = dict(TOOL_SCHEMA)
+    schema["name"] = name
+    return schema
 
 
 def _read_message():
@@ -59,8 +80,9 @@ def _negotiate_version(params):
     return PROTOCOL_VERSIONS[0]
 
 
-def serve(deliverer=None):
+def serve(deliverer=None, tool_name=None):
     service = deliverer
+    tool_name = TOOL_NAME if tool_name is None else tool_name
     while True:
         message = _read_message()
         if message is None:
@@ -76,7 +98,7 @@ def serve(deliverer=None):
                     "result": {
                         "protocolVersion": version,
                         "capabilities": {"tools": {"listChanged": False}},
-                        "serverInfo": {"name": "notify_me", "version": "1.0.0"},
+                        "serverInfo": {"name": tool_name, "version": "1.0.0"},
                     },
                 }
             )
@@ -86,13 +108,15 @@ def serve(deliverer=None):
         if service is None:
             service = Deliverer()
         if method == "tools/list":
-            _write_message({"jsonrpc": "2.0", "id": msg_id, "result": {"tools": [TOOL_SCHEMA]}})
+            _write_message(
+                {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": [_tool_schema(tool_name)]}}
+            )
             continue
         if method == "tools/call":
             params = message.get("params") or {}
             name = params.get("name")
             arguments = params.get("arguments") or {}
-            if name != TOOL_NAME:
+            if name != tool_name:
                 _write_message(
                     {
                         "jsonrpc": "2.0",
@@ -148,6 +172,6 @@ def serve(deliverer=None):
 
 if __name__ == "__main__":
     try:
-        serve()
+        serve(tool_name=advertised_tool_name())
     except KeyboardInterrupt:
         raise SystemExit(0)

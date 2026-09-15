@@ -171,6 +171,29 @@ class InstalledPluginRootTests(unittest.TestCase):
         self.assertNotIn("b47b0296", str(found))
 
 
+class DualMcpNameInstallTests(unittest.TestCase):
+    def test_install_py_adds_notifyme_and_keeps_notify_me(self):
+        text = (SCRIPTS / "notify_me" / "install.py").read_text(encoding="utf-8")
+        self.assertIn('"notify_me"', text)
+        self.assertIn('"notifyme"', text)
+        self.assertIn('"--name", "notifyme"', text)
+        self.assertNotIn("mcp\", \"remove\", \"notify_me\"", text)
+
+    def test_mcp_json_declares_both_servers(self):
+        payload = json.loads((ROOT / ".mcp.json").read_text(encoding="utf-8"))
+        servers = payload["mcpServers"]
+        self.assertIn("notify_me", servers)
+        self.assertIn("notifyme", servers)
+        self.assertEqual(
+            servers["notify_me"]["args"],
+            ["-u", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_server.py"],
+        )
+        self.assertEqual(
+            servers["notifyme"]["args"],
+            ["-u", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_server.py", "--name", "notifyme"],
+        )
+
+
 class GitHubRepoNameTests(unittest.TestCase):
     def test_install_entrypoints_use_notifyme_repo(self):
         readme = (REPO / "README.md").read_text(encoding="utf-8")
@@ -237,6 +260,20 @@ class InstallShResolverTests(unittest.TestCase):
         self.assertIn("notify-me-*", text)
         self.assertNotIn(HARDCODED_HASH, text)
         self.assertNotIn("api.day.app", text)
+
+    def test_install_sh_registers_notifyme_without_removing_notify_me(self):
+        text = (REPO / "install.sh").read_text(encoding="utf-8")
+        self.assertIn(
+            'grok mcp add notify_me -- python3 -u "$plugin/scripts/mcp_server.py"',
+            text,
+        )
+        self.assertIn(
+            'grok mcp add notifyme -- python3 -u "$plugin/scripts/mcp_server.py" --name notifyme',
+            text,
+        )
+        self.assertIn("notify_me:", text)
+        self.assertIn("notifyme:", text)
+        self.assertNotIn("mcp remove notify_me", text)
 
     def test_install_sh_resolver_matches_python(self):
         leftover = _make_plugin(self.installed, "notify-me-oldhash", mtime=2_000)
